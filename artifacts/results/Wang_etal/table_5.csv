@@ -1,0 +1,17 @@
+Dataset,Model,Present,Absent,Possible,micro F-1
+i2b2 2010,Logistic Regression,0.926,0.866,0.468,0.888
+i2b2 2010,RadText [35],0.897,0.706,0.420,0.839
+i2b2 2010,BERT model [4],0.977,0.967,0.756,0.964
+i2b2 2010,Prompt model,0.980,0.975,0.769,0.966
+i2b2 2012,Logistic Regression,0.921,0.782,0.548,0.874
+i2b2 2012,RadText [35],0.898,0.607,0.348,0.829
+i2b2 2012,BERT model [4],0.955,0.866,0.652,0.924
+i2b2 2012,Prompt model,0.956,0.875,0.656,0.927
+BioScope,Logistic Regression,0.945,0.780,0.720,0.877
+BioScope,RadText [35],0.836,0.631,0.432,0.735
+BioScope,BERT model [4],0.951,0.835,0.732,0.892
+BioScope,Prompt model,0.966,0.823,0.811,0.912
+MIMIC-III,Logistic Regression,0.899,0.846,0.454,0.855
+MIMIC-III,RadText [35],0.880,0.700,0.420,0.816
+MIMIC-III,BERT model [4],0.951,0.937,0.621,0.927
+MIMIC-III,Prompt model,0.950,0.933,0.662,0.927

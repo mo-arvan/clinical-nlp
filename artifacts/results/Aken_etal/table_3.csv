@@ -1,0 +1,6 @@
+"Dataset", "Present", "Possible", "Absent"
+"BioScope scientific pub.", -, 0.593, 0.845
+"MIMIC-III discharge sum.", 0.951, 0.663, 0.939
+"MIMIC-III phys. letters", 0.929, 0.593, 0.892
+"MIMIC-III nurse letters", 0.967, 0.710, 0.900
+"MIMIC-III radio. reports", 0.950, 0.691, 0.977

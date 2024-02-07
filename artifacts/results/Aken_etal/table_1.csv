@@ -1,0 +1,7 @@
+"Data", "Present", "Possible", "Absent"
+"2010 i2b2 Challenge Assertion Task discharge summaries", 21064, 1418, 6144
+"BioScope scientific publications", -, 3474, 2161
+"MIMIC-III Clinical Database (New) discharge summaries", 2610, 250, 980
+"MIMIC-III Clinical Database (New) physician letters", 204, 34, 66
+"MIMIC-III Clinical Database (New) nurse letters", 293, 14, 59
+"MIMIC-III Clinical Database (New) radiology reports", 249, 40, 130

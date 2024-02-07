@@ -1,5 +1,5 @@
 datasets/*/data
-
+datasets/CHIA/11855817/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -161,3 +161,36 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+/datasets/CHIA/11855817.zip
+/.idea/inspectionProfiles/profiles_settings.xml
+/.idea/inspectionProfiles/Project_Default.xml
+/.idea/cardio-oncalogy-nlp.iml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/vcs.xml
+/datasets/CHIA/11855817/chia_with_scope.zip
+/datasets/CHIA/11855817/chia_without_scope.zip
+/datasets/cardio-oncology/data_with_phi/CardioOncologyNotesSample.xlsx
+/datasets/cardio-oncology/data_with_phi/immunotherapy_general.csv
+/datasets/cardio-oncology/data_with_phi/notes.csv
+/datasets/cardio-oncology/data_with_phi/value_extraction.txt
+/datasets/cervical/NLP_Cervical Cancer Data_with_phi/CCTS_Data Extraction 2.xlsx
+/datasets/cervical/NLP_Cervical Cancer Data_with_phi/CCTSCRDWRequest20230_DATA_LABELS_2023-11-14_1224.csv
+/datasets/cervical/NLP_Cervical Cancer Data_with_phi/holt_2023_00185_deid.csv
+/datasets/cervical/NLP_Cervical Cancer Data_with_phi/holt_2023_00185_leep_cone_colposcopy_deid.csv
+/datasets/cervical/NLP_Cervical Cancer Data_with_phi/holt_2023_00185_pap_hpv_deid.csv
+/datasets/cervical/NLP_Cervical Cancer Data_with_phi/NLP Labels.docx
+/datasets/cervical/NLP_Cervical Cancer Data_with_phi/NLP_Cervical Cancer Data.zip
+/datasets/negcorp/rsAnnotations-1-120-random.txt
+/.local/
+/artifacts/results/preliminary/cardio_oncology_batch_1(2).csv
+/artifacts/results/preliminary/cardio_oncology_notes.csv
+/artifacts/results/preliminary/cardio_oncology_notes.xlsx
+/artifacts/results/preliminary/cervical_notes.csv
+/artifacts/results/preliminary/cervical_notes_2.csv
+/artifacts/results/preliminary/cervical_notes_match_pattern_counts.csv
+/artifacts/results/preliminary/llama_2.csv
+/artifacts/results/preliminary/llama_2.tex
+/artifacts/results/preliminary/matched_patterns.csv
+/artifacts/results/preliminary/medspacy_context.csv
+/artifacts/results/preliminary/medspacy_context.tex

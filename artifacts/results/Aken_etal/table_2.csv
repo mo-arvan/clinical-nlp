@@ -1,0 +1,12 @@
+"Model",F1 for Present,F1 for Possible,F1 for Absent
+"Earlier approaches"
+"SVM Classifier (de Bruijn et al., 2011b)",0.959,0.643,0.939
+"Conditional Softmax Shared Decoder (Bhatia et al., 2019)",-,0.905,-
+"Bi-directional LSTM with Attention (Chen, 2019)",0.950,0.637,0.927
+"Language models under evaluation"
+"BERT Base (Devlin et al., 2019)",0.968,0.704,0.943
+"BioBERT Base (Lee et al., 2020)",0.976,0.759,0.963
+"Bio+Clinical BERT (Alsentzer et al., 2019)",0.977,0.775,0.966
+"Bio+Discharge Summary BERT (Alsentzer et al., 2019)",0.979,0.786,0.972
+"Bio+Clinical Outcome Representations (CORe) (van Aken et al., 2021)",0.975,0.761,0.965
+"Biomed RoBERTa Base (Gururangan et al., 2020)",0.976,0.723,0.967

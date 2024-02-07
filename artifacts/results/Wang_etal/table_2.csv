@@ -1,0 +1,8 @@
+Dataset,Size,Present,Absent,Possible,Hypothetical,Conditional,Not Associated,Total
+i2b2 2010 Train,170,4624,1596,309,382,73,89,7073
+i2b2 2010 Test,256,8604,2592,646,442,148,131,12563
+i2b2 2012 Test,119,3360,640,245,-,64,-,4309
+BioScope,1954,5338,899,1368,-,-,-,7605
+MIMIC-III,239,3392,1243,365,-,-,-,5000
+NegEx,116,1885,491,-,-,-,-,2376
+Chia,1000,1057,1057,-,-,-,-,2114
