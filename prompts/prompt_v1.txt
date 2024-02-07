@@ -1,0 +1,50 @@
+Classify the span into present, absent, possible, conditional, hypothetical, or associated_with_someone_else.
+
+Label Definition:
+Present: Use when the text asserts that a medical problem currently affects the patient.
+Absent: Use when the text asserts the absence of a medical problem in the patient. This also covers cases where the patient had a problem but no longer does.
+Possible: Use when the text suggests the patient may have a problem, but there is uncertainty expressed.
+Conditional: Use when the mention asserts that the patient experiences the problem only under certain conditions.
+Hypothetical: Use for assertions that the patient may develop the problem in the future.
+Associated with Someone Else: Use when the mention is about a medical problem associated with someone other than the patient.
+
+Examples:
+text: "Patient had a stroke."
+span: "a stroke"
+assertion: "present"
+text: "Patient denies pain."
+span: "pain"
+assertion: "absent"
+text: "Suspicion of pneumonia."
+span: "pneumonia"
+assertion: "possible"
+text: "Patient reports shortness of breath upon climbing stairs."
+span: "shortness of breath"
+assertion: "conditional"
+text: "If you experience wheezing or shortness of breath..."
+span: "wheezing"
+assertion: "hypothetical"
+text: "Family history of prostate cancer."
+span: "prostate cancer"
+assertion: "associated_with_someone_else"
+
+Your Task:
+text: "Admission Date :
+2013-05-14
+Discharge Date :
+2013-05-18
+Date of Birth :
+1953-07-27
+Sex :
+F
+Service :
+CMED CSRU
+CHIEF COMPLAINT :
+The patient was admitted originally for airway monitoring status post endoscopic retrograde
+cholangiopancreatography with adverse reaction to Fentanyl and tongue injury .
+HISTORY OF PRESENT ILLNESS :
+The patient is a 59 year-old female status post endoscopic retrograde cholangiopancreatography on the day of admission , which had been done to evaluate for possible bile leak after cholecystectomy was performed four days ago .
+"
+span: "adverse reaction"
+assertion:
+Do not output anything but the label.

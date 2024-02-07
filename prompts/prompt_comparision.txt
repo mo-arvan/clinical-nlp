@@ -1,0 +1,4 @@
+Question 7: Classify the following text into one of these categories: Sports, Technology, Health, or Politics: "Apple recently unveiled its latest iPhone, featuring a faster processor and improved battery life."
+
+
+From: https://github.com/Troyanovsky/Local-LLM-Comparison-Colab-UI
