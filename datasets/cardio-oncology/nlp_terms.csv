@@ -16,7 +16,7 @@ Severe pulmonary hypertension (RVSP > 60),,,,
 Past Myocarditis,,,,
 A1C > 9,diabetes melitus,,,
 Troponin > 0.02,AMI,NSTEMI,Acute Myocardial Infarction,STEMI
-GLS (global longitudinal strain) > 17,subclinical LV dysunction ,,,
+Global Longitudinal Strain,subclinical LV dysunction ,global longitudinal strain,GLS,
 Essential Hypertension,,,,
 "Diabetes Mellitus (1+2, exclude gestational & hospice)",hyperglycemia,,,
 Age > 65,geriatric,senior,advanced age,
@@ -34,3 +34,4 @@ LDL 160 to 189 ,"hyperlipidemia, mixed",,,
 HDL 41 to 59,dyslipidemia,,,
 Former Smoker,,,,
 CART Cell Procedure,bone marrow transplantation ,,,
+

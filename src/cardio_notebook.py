@@ -1,9 +1,16 @@
+# ! pip install numpy medspacy tqdm spacy
+# dbutils.library.restartPython()
+
+import concurrent.futures
+import functools
+import re
+
 import medspacy
 import numpy as np
 import pandas as pd
 from medspacy.ner import TargetRule
 from tqdm import tqdm
-import re
+
 
 def load_terms(term_csv_file):
     nlp_terms = pd.read_csv(term_csv_file)
@@ -17,6 +24,32 @@ def load_terms(term_csv_file):
                 terms_list.append((row[jj], label))
 
     return terms_list
+
+
+def run_in_parallel_cpu_bound(func, iterable, max_workers=None, disable=False, total=None, **kwargs):
+    """
+    Run a function in parallel on a list of arguments
+    :param disable: whether to disable the progress bar
+    :param func: function to run
+    :param iterable: list of arguments
+    :param max_workers: maximum number of workers to use
+    :param kwargs: keyword arguments to pass to the function
+    :return: list of results
+    """
+    results = []
+    if hasattr(iterable, "len"):
+        total = len(iterable)
+
+    with tqdm(total=total, disable=disable) as progress_bar:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_dict = {
+                executor.submit(func, item, **kwargs): index
+                for index, item in enumerate(iterable)
+            }
+            for future in concurrent.futures.as_completed(future_dict):
+                results.append(future.result())
+                progress_bar.update(1)
+    return results
 
 
 def get_medspacy_label(ent):
@@ -64,86 +97,115 @@ def get_medspacy_label(ent):
     return label
 
 
-def run_medspacy(notes_df, labels_list):
-    nlp_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/nlp/"
+def parse_value_from_sentence(sentence_text, label, matched_pattern):
+    value = None
+    if label in ["Global Longitudinal Strain",
+                 "EF 51%-54%", ]:
+        value_patterns = [
+            re.compile(r'(\d{1,2}-\d{1,2})%'),
+            re.compile(r'(\d{1,2})%'),
+        ]
+        pattern_index_in_sentence = sentence_text.find(matched_pattern)
+        sentence_starting_with_matched_pattern = sentence_text[pattern_index_in_sentence:]
+        for pattern in value_patterns:
+            match = pattern.search(sentence_starting_with_matched_pattern)
+            if match:
+                value = match.group(1)
+                break
+    return value
 
-    nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
+
+def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
+    i, data_row = i_data_row
+    doc = medspacy_nlp(data_row[note_text_column])
+
+    row_dict = data_row.to_dict()
+    note_id = data_row[note_text_column]
+    # row_dict.pop(note_text_column, None)
+    results_list = []
+    if len(doc.ents) > 0:
+        for sentence in doc.sents:
+            for ent in sentence.ents:
+                sentence_text = sentence.text
+                matched_pattern = ent.text
+                label = ent.label_
+                assertion = get_medspacy_label(ent)
+                value = parse_value_from_sentence(sentence_text, label, matched_pattern)
+
+                ent_20_window_start = max(ent.start - 10, 0)
+                ent_20_window_end = min(ent.end + 10, len(sentence.doc))
+                window_context_20 = " ".join(
+                    [token.text for token in sentence.doc[ent_20_window_start:ent_20_window_end]])
+
+                prediction_id = f"note_{note_id}_ent_{ent.start}_{ent.end}"
+
+                results_dict = {
+                    "context": window_context_20,
+                    "matched_pattern": matched_pattern,
+                    "label": label,
+                    "assertion": assertion,
+                    "prediction_id": prediction_id,
+                    "value": value,
+                    **row_dict
+                }
+                results_list.append(results_dict)
+
+    return results_list
+
+
+def get_data(spark, num_slices):
+    table_name = "`hive_metastore`.`cardio_oncology`.`unstructured_notes`"
+    total_rows = spark.sql(f"SELECT COUNT(*) FROM {table_name}").collect()[0][0]
+
+    rows_per_slice = total_rows // num_slices
+
+    for i in range(num_slices):
+        # Calculate OFFSET for each slice
+        offset = i * rows_per_slice
+
+        # Fetch data for the current slice
+        query = f"SELECT * FROM {table_name} LIMIT {rows_per_slice} OFFSET {offset}"
+        notes_spark = spark.sql(query)
+
+        notes_df = notes_spark.toPandas()
+
+        yield notes_df
+
+
+def run_medspacy(notes_df_iterator, labels_list, out_dir):
+    nlp = medspacy.load(medspacy_enable=["medspacy_pyrush",
+                                         "medspacy_target_matcher",
+                                         "medspacy_context"])
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
     target_rules = [TargetRule(literal=r[0].strip(), category=r[1]) for r in labels_list]
     target_matcher.add(target_rules)
 
-    result_list = []
-    matched_pattern_list = []
+    for i, notes_df in enumerate(notes_df_iterator):
+        notes_df = notes_df.head(1000)
+        run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
+                                                         medspacy_nlp=nlp,
+                                                         note_text_column="NOTE_TEXT")
+        doc_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
+                                             notes_df.iterrows(),
+                                             total=len(notes_df),
+                                             max_workers=16)
 
-    for i, row in tqdm(notes_df.iterrows(), total=len(notes_df)):
-        doc = nlp(row["NOTE_TEXT"])
-        if len(doc.ents) > 0:
+        result_list = [result for doc in doc_list for result in doc if len(doc) > 0]
 
-            for sentence in doc.sents:
-                for ent in sentence.ents:
-                    sentence_text = sentence.text
-                    matched_pattern = ent.text
-                    label = ent.label_
-                    assertion = get_medspacy_label(ent)
+        results_df = pd.DataFrame(result_list)
 
-                    window_context_10 = " ".join([token.text for token in sentence.doc[ent.start - 10:ent.end + 10]])
-                    window_context_20 = " ".join([token.text for token in sentence.doc[ent.start - 20:ent.end + 20]])
+        out_file = f"{out_dir}/results_{i}.csv"
+        results_df.to_csv(out_file, index=False)
 
-                    matched_pattern_list.append(matched_pattern.lower().strip())
-                    value = ""
 
-                    if matched_pattern == "left ventricular ejection fraction":
-                        # Define regex patterns
-                        pattern1 = re.compile(r'Left ventricular ejection fraction (\d{1,2}-\d{1,2})%')
-                        pattern2 = re.compile(r'left ventricular ejection fraction of (\d{1,2})%')
-                        pattern3 = re.compile(r'left ventricular ejection fraction is (\d{1,2})%')
+# local dir
+# nlp_dir = "/artifact/results/cardio-oncology-nlp/"
+spark = None
+# remote dir
+nlp_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/nlp/"
 
-                        # Extract values using regex patterns
-                        match1 = pattern1.search(sentence_text)
-                        match2 = pattern2.search(sentence_text)
-                        match3 = pattern3.search(sentence_text)
+nlp_terms = load_terms(f"{nlp_dir}/nlp_terms.csv")
+notes_df = get_data(spark, 10)
 
-                        if match1:
-                            value = match1.group(1)
-                        elif match2:
-                            value = match2.group(1)
-                        elif match3:
-                            value = match3.group(1)
-                        else:
-                            print(f"failed to extract value for {matched_pattern} in {sentence_text}")
-                    elif matched_pattern == "LVEF":
-                        pattern1 = re.compile(r'LVEF is (\d{1,2})%')
-                        pattern2 = re.compile(r'LVEF (\d{1,2}-\d{1,2})%')
-                        pattern3 = re.compile(r'LVEF of (\d{1,2}-\d{1,2})%')
-
-                        match1 = pattern1.search(sentence_text)
-                        match2 = pattern2.search(sentence_text)
-                        match3 = pattern3.search(sentence_text)
-
-                        if match1:
-                            value = match1.group(1)
-                        elif match2:
-                            value = match2.group(1)
-                        elif match3:
-                            value = match3.group(1)
-                        else:
-                            print(f"failed to extract value for {matched_pattern} in {sentence_text}")
-
-                    results_dict = {
-                        "10 words context": window_context_10,
-                        "20 words context": window_context_20,
-                        "sentence": sentence_text,
-                        "matched_pattern": matched_pattern,
-                        "label": label,
-                        "assertion": assertion,
-                        "value": value,
-                        **row[:-1].to_dict()
-                    }
-                    result_list.append(results_dict)
-
-        if (i + 1) % 10000 == 0:
-            results_df = pd.DataFrame(result_list)
-            batch_number = (i + 1) // 10000
-            results_df.to_csv(nlp_dir + f"cardio_oncology_batch_{batch_number}.csv", index=False)
-            result_list = []
+run_medspacy(notes_df, nlp_terms, nlp_dir)
