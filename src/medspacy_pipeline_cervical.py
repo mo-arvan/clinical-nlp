@@ -292,8 +292,26 @@ def main():
     results_df_joined = results_df.merge(cervical_labels, on=["prediction_id", "matched_pattern", "pred_label"],
                                          how="left")
 
-    results_df_joined.to_csv("artifacts/results/cervical_notes_with_labels.csv", index=False)
+    eval_df = results_df_joined[["pred_label", "gold_label"]].groupby(
+        ["pred_label", "gold_label"]).size().reset_index(name="count")
 
+    micro_average = eval_df.groupby("gold_label").agg(
+        count=("count", "sum")).reset_index()
+    annotation_values = ["false positive", "false negative", "true positive"]
+
+    for annotation in annotation_values:
+        if annotation not in micro_average["gold_label"].values:
+            micro_average.loc[len(micro_average)] = [annotation, 0]
+
+    micro_average["pred_label"] = "micro_average"
+
+    # concatenate the two dataframes
+    eval_df = pd.concat([eval_df, micro_average], ignore_index=True)
+    confusion_matrix_df = eval_df.pivot(index="pred_label", columns="gold_label", values="count").fillna(0)
+
+    confusion_matrix_df.to_csv("artifacts/results/cervical_confusion_matrix.csv")
+    results_df_joined.to_csv("artifacts/results/cervical_notes_with_labels.csv", index=False)
+    results_df_joined.to_excel("artifacts/results/cervical_notes_with_labels.xlsx", index=False)
     results_labeled = results_df_joined.dropna(subset=["gold_label"])
 
     labels_count = results_labeled[["matched_pattern", "pred_label"]].groupby(
