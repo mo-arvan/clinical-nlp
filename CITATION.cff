@@ -1,0 +1,17 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: clinical-nlp
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Mohammad
+    family-names: Arvan
+    email: marvan3@uic.edu
+    affiliation: University of Illinois at Chicago
+    orcid: 'https://orcid.org/0000-0001-9155-4559'
+repository-code: 'https://github.com/mo-arvan/clinical-nlp'
+license: CC-BY-NC-4.0
