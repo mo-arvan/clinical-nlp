@@ -1,8 +1,10 @@
-# ! pip install numpy medspacy tqdm spacy
+# ! pip install -q numpy medspacy tqdm spacy
 # dbutils.library.restartPython()
 
 import concurrent.futures
+import datetime
 import functools
+import os
 import re
 
 import medspacy
@@ -120,7 +122,7 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     doc = medspacy_nlp(data_row[note_text_column])
 
     row_dict = data_row.to_dict()
-    note_id = data_row[note_text_column]
+    note_id = data_row["note_id"]
     # row_dict.pop(note_text_column, None)
     results_list = []
     if len(doc.ents) > 0:
@@ -153,26 +155,33 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     return results_list
 
 
-def get_data(spark, num_slices):
+def get_notes_df(spark, ids_list):
+    in_clause = ",".join(map(lambda x: f"'{x}'", ids_list))
     table_name = "`hive_metastore`.`cardio_oncology`.`unstructured_notes`"
-    total_rows = spark.sql(f"SELECT COUNT(*) FROM {table_name}").collect()[0][0]
+    total_rows = spark.sql(f"SELECT COUNT(*) FROM {table_name} WHERE PAT_ID IN ({in_clause})").collect()[0][0]
 
-    rows_per_slice = total_rows // num_slices
+    query = f"SELECT * FROM {table_name} WHERE PAT_ID IN ({in_clause})"
+    notes_spark = spark.sql(query)
 
-    for i in range(num_slices):
-        # Calculate OFFSET for each slice
-        offset = i * rows_per_slice
+    notes_df = notes_spark.toPandas()
 
-        # Fetch data for the current slice
-        query = f"SELECT * FROM {table_name} LIMIT {rows_per_slice} OFFSET {offset}"
-        notes_spark = spark.sql(query)
-
-        notes_df = notes_spark.toPandas()
-
-        yield notes_df
+    return notes_df
 
 
-def run_medspacy(notes_df_iterator, labels_list, out_dir):
+def get_ids_of_interest(spark):
+    ids_table_name = "`hive_metastore`.`cardio_oncology`.`ids_of_interest`"
+
+    query = f"SELECT * FROM {ids_table_name}"
+    ids_spark = spark.sql(query)
+
+    ids_df = ids_spark.toPandas()
+
+    ids_list = ids_df["EpicPatientID"].unique().tolist()
+
+    return ids_list
+
+
+def run_medspacy(notes_df, labels_list, out_dir):
     nlp = medspacy.load(medspacy_enable=["medspacy_pyrush",
                                          "medspacy_target_matcher",
                                          "medspacy_context"])
@@ -181,31 +190,36 @@ def run_medspacy(notes_df_iterator, labels_list, out_dir):
     target_rules = [TargetRule(literal=r[0].strip(), category=r[1]) for r in labels_list]
     target_matcher.add(target_rules)
 
-    for i, notes_df in enumerate(notes_df_iterator):
-        notes_df = notes_df.head(1000)
-        run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
-                                                         medspacy_nlp=nlp,
-                                                         note_text_column="NOTE_TEXT")
-        doc_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
-                                             notes_df.iterrows(),
-                                             total=len(notes_df),
-                                             max_workers=16)
+    notes_count = 0
+    notes_df["note_id"] = notes_df.index + notes_count
 
-        result_list = [result for doc in doc_list for result in doc if len(doc) > 0]
+    run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
+                                                     medspacy_nlp=nlp,
+                                                     note_text_column="NOTE_TEXT")
+    doc_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
+                                         notes_df.iterrows(),
+                                         total=len(notes_df),
+                                         max_workers=10)
 
-        results_df = pd.DataFrame(result_list)
+    result_list = [result for doc in doc_list for result in doc if len(doc) > 0]
 
-        out_file = f"{out_dir}/results_{i}.csv"
-        results_df.to_csv(out_file, index=False)
+    results_df = pd.DataFrame(result_list)
+
+    out_file = f"{out_dir}/results.csv"
+    results_df.to_csv(out_file, index=False)
 
 
-# local dir
-# nlp_dir = "/artifact/results/cardio-oncology-nlp/"
-spark = None
-# remote dir
-nlp_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/nlp/"
+project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
+# remote dir shared
+current_datetime_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
 
-nlp_terms = load_terms(f"{nlp_dir}/nlp_terms.csv")
-notes_df = get_data(spark, 10)
+if not os.path.exists(out_dir):
+    os.makedirs(out_dir)
 
-run_medspacy(notes_df, nlp_terms, nlp_dir)
+nlp_terms = load_terms(f"{project_dir}/nlp_terms.csv")
+ids_list = get_ids_of_interest(spark)
+notes_df = get_notes_df(spark, ids_list)
+
+
+run_medspacy(notes_df, nlp_terms, out_dir)
