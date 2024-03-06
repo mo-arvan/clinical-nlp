@@ -1,43 +1,43 @@
-import csv
 import functools
+import hashlib
+import json
 import time
+
 import medspacy
 import numpy as np
 import pandas as pd
 from medspacy.ner import TargetRule
 
 import parallel_helper
+from resources import cervical_rulebook
 
 
 def read_cervical_data():
-    terms_file_path = "datasets/cervical/terms.csv"
-    data_path_1 = "datasets/cervical/data_with_phi/holt_2023_00185_pap_hpv_deid.csv"
-    # data_path_2 = "datasets/cervical/CCTSCRDWRequest20230_DATA_LABELS_2023-11-14_1224.csv"
-    data_df = pd.read_csv(data_path_1)
+    data_path = "datasets/cervical/data_with_phi/holt_2023_00185_pap_hpv_deid.csv"
+
+    data_df = pd.read_csv(data_path)
+
+
 
     duplicate_notes_condition = data_df.duplicated(keep=False)
     data_df[duplicate_notes_condition].to_csv("artifacts/results/cervical_duplicate_notes.csv", index=False)
 
     data_df["note_id"] = range(len(data_df))
+    data_df["note_hash"] = [hashlib.md5(note.encode()).hexdigest() for note in data_df["PROC_NARRATIVE"]]
 
     data_df = data_df[~duplicate_notes_condition]
 
-    label_pattern_list = []
-    with open(terms_file_path, "r") as f:
-        csv_reader = csv.reader(f)
-        for i, row in enumerate(csv_reader):
-            if i == 0 or len(row) == 0:
-                continue
-            group, label, term_list = row[0], row[1], row[2:]
-            if len(label.strip()) == 0:
-                continue
-            term_list = [term.strip().replace('"', '').replace("'", "") for term in term_list]
-            term_list = [term for term in term_list if len(term) > 0]
-            for term in term_list:
-                label_pattern_list.append((label, term))
-    notes_column = "PROC_NARRATIVE"  # "Proc narrative"
+    data_df.fillna(value="Not Available", inplace=True)
 
-    return data_df, label_pattern_list, notes_column
+    notes_column = "PROC_NARRATIVE_CLEAN"  # "Proc narrative"
+
+    data_df["PROC_NARRATIVE_CLEAN"] = data_df["PROC_NARRATIVE"].apply(lambda x: x.replace("\\n", "\n"))
+
+    rule_set = [TargetRule(literal=rule.get("literal", ""), category=rule.get("category", ""),
+                           pattern=rule.get("pattern", None))
+                for rule in cervical_rulebook.cervical_rulebook_definition]
+
+    return data_df, rule_set, notes_column
 
 
 def get_medspacy_label(ent):
@@ -91,58 +91,64 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
 
     row_dict = data_row.to_dict()
     note_id = data_row["note_id"]
-    # row_dict.pop(note_text_column, None)
-    results_list = []
-    if len(doc.ents) > 0:
-        for sentence in doc.sents:
-            for ent in sentence.ents:
-                sentence_text = sentence.text
-                matched_pattern = ent.text
-                label = ent.label_
-                assertion = get_medspacy_label(ent)
 
-                # ent_10_window_start = max(ent.start - 5, 0)
-                # ent_10_window_end = min(ent.end + 5, len(sentence.doc))
-                ent_20_window_start = max(ent.start - 10, 0)
-                ent_20_window_end = min(ent.end + 10, len(sentence.doc))
-                # window_context_10 = " ".join(
-                #     [token.text for token in sentence.doc[ent_10_window_start:ent_10_window_end]])
-                window_context_20 = " ".join(
-                    [token.text for token in sentence.doc[ent_20_window_start:ent_20_window_end]])
+    prediction_list = []
+    for ent in doc.ents:
+        text = ent.text
+        label = ent.label_
+        assertion = get_medspacy_label(ent)
+        prediction_id = f"note_{note_id}_ent_{ent.start}_{ent.end}"
 
-                prediction_id = f"note_{note_id}_ent_{ent.start}_{ent.end}"
+        prediction_dict = {
+            "value": {
+                "start": ent.start_char,
+                "end": ent.end_char,
+                "text": text,
+                "labels": [label, assertion],
+            },
+            "id": prediction_id,
+            "from_name": "label",
+            "to_name": "text",
+            "type": "labels",
+            "origin": "prediction",
+        }
+        prediction_list.append(prediction_dict)
 
-                results_dict = {
-                    "context": window_context_20,
-                    "matched_pattern": matched_pattern,
-                    "label": label,
-                    "assertion": assertion,
-                    "prediction_id": prediction_id,
-                    **row_dict
-                }
-                results_list.append(results_dict)
+    results_dict = {
+        "id": note_id,
+        "data": {
+            "num_predictions": len(prediction_list),
+            **row_dict
+        },
+        "predictions": [
+            {
+                "result": prediction_list,
+            }
+        ]
+    }
 
-    return results_list
+    return results_dict
 
 
-def run_medspacy(notes_df, labels_list, notes_column):
+def run_medspacy(notes_df, rule_set, notes_column):
     nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
-    target_rules = [TargetRule(literal=r[1].strip(), category=r[0]) for r in labels_list]
-    target_matcher.add(target_rules)
-
-    # notes_df = notes_df.head(100)
+    target_matcher.add(rule_set)
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
                                                      note_text_column=notes_column)
-    doc_list = parallel_helper.run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
-                                                         notes_df.iterrows(),
-                                                         total=len(notes_df),
-                                                         max_workers=16)
+    doc_results_list = parallel_helper.run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
+                                                                 notes_df.iterrows(),
+                                                                 total=len(notes_df),
+                                                                 max_workers=16)
 
-    result_list = [result for doc in doc_list for result in doc if len(doc) > 0]
+    return doc_results_list
+
+
+def export_results(doc_results_list, labels_list, out_dir):
+    result_list = [result for doc in doc_results_list for result in doc if len(doc) > 0]
 
     results_df = pd.DataFrame(result_list)
 
@@ -162,15 +168,7 @@ def run_medspacy(notes_df, labels_list, notes_column):
 
     match_pattern_counts.to_csv("artifacts/results/cervical_notes_match_pattern_counts.csv", index=False)
 
-
-# text = """
-# Past Medical History:
-# 1. Atrial fibrillation
-# 2. Type II Diabetes Mellitus
-#
-# Assessment and Plan:
-# There is no evidence of pneumonia. Continue warfarin for Afib. Follow up for management of type 2 DM.
-# """
+    return results_df
 
 
 def calculate_precision_recall_f1(true_positives, false_positives, false_negatives):
@@ -271,23 +269,34 @@ def evaluate(predictions, labels_list):
     result_df.to_csv("artifacts/results/medspacy_context.csv")
     result_df.to_latex("artifacts/results/medspacy_context.tex")
 
-    print(result_df)
+    return result_df
 
 
-def main():
-    run_time = time.strftime("%Y%m%d-%H%M%S")
-    notes_df, labels_list, notes_column = read_cervical_data()
-    #
-    # # slice the first 1000 notes
-    # # notes_df = notes_df.head(1000)
-    #
-    # run_medspacy(notes_df, labels_list, notes_column)
-    #
-    results_df = pd.read_csv("artifacts/results/cervical_notes.csv")
+def export_as_label_studio_format(doc_results_list, out_dir):
+    out_file_path = f"{out_dir}/cervical_notes_with_labels.json"
+    results_list = [doc for doc in doc_results_list if len(doc) > 0]
+    with open(out_file_path, "w") as f:
+        json.dump(results_list, f, indent=2)
 
+
+def misc_func():
+    export_as_label_studio_format(doc_results_list, "artifacts/results/")
+
+    from collections import Counter
+
+    l = Counter([r["value"]["text"] for p in doc_results_list for r in p["predictions"][0]["result"]])
+    l = sorted(l.items(), key=lambda x: x[1], reverse=True)
+    print(l)
+    labels = set([ll for p in doc_results_list for r in p["predictions"][0]["result"] for ll in r["value"]["labels"]])
+
+    known_labels = [r.category for r in rule_set]
+
+    missing_labels = [l for l in known_labels if l not in labels]
+    print(missing_labels)
+
+
+def evaluate():
     results_df.rename(columns={"label": "pred_label"}, inplace=True)
-
-    cervical_labels = pd.read_csv("datasets/cervical/cervical_labels.csv")
 
     results_df_joined = results_df.merge(cervical_labels, on=["prediction_id", "matched_pattern", "pred_label"],
                                          how="left")
@@ -319,24 +328,22 @@ def main():
 
     labels_count.to_csv("artifacts/results/cervical_labels_count.csv", index=False)
 
-    # pivoting
 
-    print("")
+def main():
+    run_time = time.strftime("%Y%m%d-%H%M%S")
+    notes_df, rule_set, notes_column = read_cervical_data()
+
+    cervical_labels = pd.read_csv("datasets/cervical/cervical_labels.csv")
+    labeled_notes = set(cervical_labels["prediction_id"].apply(lambda x: int(x.split("_")[1])))
+
+    notes_df = notes_df[notes_df["note_id"].isin(labeled_notes)]
+
+    # slice the notes
+    # notes_df = notes_df.head(100)
+    doc_results_list = run_medspacy(notes_df, rule_set, notes_column)
+
+    export_as_label_studio_format(doc_results_list, "artifacts/results/")
 
 
 if __name__ == '__main__':
     main()
-
-# def main():
-#     labels_files = collections.Counter([l[0] for l in labels_list])
-#     labels_files = sorted(labels_files.items(), key=lambda x: x[1], reverse=True)
-#     selected_files = [l[0] for l in labels_files[:10]]
-#     sliced_labels = [l for l in labels_list if l[0] in selected_files]
-#     sliced_medspacy_doc_dict = {k: v for k, v in medspacy_doc_dict.items() if k in selected_files}
-#
-#     predictions = run_contex(sliced_medspacy_doc_dict)
-#     evaluate(predictions, sliced_labels, "medspacy_context", sliced_medspacy_doc_dict)
-#
-#
-# if __name__ == '__main__':
-#     main()

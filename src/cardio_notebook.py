@@ -4,6 +4,7 @@
 import concurrent.futures
 import datetime
 import functools
+import hashlib
 import os
 import re
 
@@ -122,7 +123,7 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     doc = medspacy_nlp(data_row[note_text_column])
 
     row_dict = data_row.to_dict()
-    note_id = data_row["note_id"]
+    note_hash = data_row["note_hash"]
     # row_dict.pop(note_text_column, None)
     results_list = []
     if len(doc.ents) > 0:
@@ -139,16 +140,17 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
                 window_context_20 = " ".join(
                     [token.text for token in sentence.doc[ent_20_window_start:ent_20_window_end]])
 
-                prediction_id = f"note_{note_id}_ent_{ent.start}_{ent.end}"
+                prediction_id = f"{note_hash}_{ent.start}_{ent.end}"
 
                 results_dict = {
                     "context": window_context_20,
                     "matched_pattern": matched_pattern,
                     "label": label,
                     "assertion": assertion,
-                    "prediction_id": prediction_id,
                     "value": value,
-                    **row_dict
+                    **row_dict,
+                    "prediction_id": prediction_id,
+
                 }
                 results_list.append(results_dict)
 
@@ -190,16 +192,14 @@ def run_medspacy(notes_df, labels_list, out_dir):
     target_rules = [TargetRule(literal=r[0].strip(), category=r[1]) for r in labels_list]
     target_matcher.add(target_rules)
 
-    notes_count = 0
-    notes_df["note_id"] = notes_df.index + notes_count
+    notes_df["note_hash"] = notes_df["NOTE_TEXT"].apply(lambda x: hashlib.md5(x.encode()).hexdigest())
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
                                                      note_text_column="NOTE_TEXT")
     doc_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
                                          notes_df.iterrows(),
-                                         total=len(notes_df),
-                                         max_workers=10)
+                                         total=len(notes_df))
 
     result_list = [result for doc in doc_list for result in doc if len(doc) > 0]
 
@@ -211,7 +211,7 @@ def run_medspacy(notes_df, labels_list, out_dir):
 
 project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
 # remote dir shared
-current_datetime_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+current_datetime_str = datetime.datetime.now().strftime("%Y%m%d")
 out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
 
 if not os.path.exists(out_dir):
@@ -222,4 +222,5 @@ ids_list = get_ids_of_interest(spark)
 notes_df = get_notes_df(spark, ids_list)
 
 
+notes_subset_df = notes_df.sample(1000)
 run_medspacy(notes_df, nlp_terms, out_dir)
