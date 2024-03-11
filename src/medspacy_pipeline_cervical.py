@@ -14,10 +14,7 @@ from resources import cervical_rulebook
 
 def read_cervical_data():
     data_path = "datasets/cervical/data_with_phi/holt_2023_00185_pap_hpv_deid.csv"
-
     data_df = pd.read_csv(data_path)
-
-
 
     duplicate_notes_condition = data_df.duplicated(keep=False)
     data_df[duplicate_notes_condition].to_csv("artifacts/results/cervical_duplicate_notes.csv", index=False)

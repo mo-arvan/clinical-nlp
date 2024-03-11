@@ -1,32 +1,177 @@
+"""
 # ! pip install -q numpy medspacy tqdm spacy
 # dbutils.library.restartPython()
+"""
 
 import concurrent.futures
 import datetime
 import functools
 import hashlib
-import os
-import re
-
+import json
 import medspacy
 import numpy as np
+import os
 import pandas as pd
+import re
+import time
+
 from medspacy.ner import TargetRule
 from tqdm import tqdm
 
 
-def load_terms(term_csv_file):
-    nlp_terms = pd.read_csv(term_csv_file)
-    terms_list = []
 
-    for i, row in nlp_terms.iterrows():
-        label = row["Discrete Data Element"]
 
-        for jj in range(1, len(row)):
-            if row[jj] is not np.nan:
-                terms_list.append((row[jj], label))
+CARDIO_RULEBOOK = [
+    {
+        "category": "Malignant Neoplasm of the Breast",
+        "pattern": r"breast cancer"
+    },
+    {
+        "category": "Melanoma",
+        "pattern": r"skin cancer"
+    },
+    {
+        "category": "Lung Cancer",
+        "pattern": r"lung adenocarcinoma|squamous cell lung carcinoma"
+    },
+    {
+        "category": "Kidney Cancer",
+        "pattern": r"renal cancer"
+    },
+    {
+        "category": "B-Cell Lymphoma",
+        "pattern": r"hematological malignancy"
+    },
+    {
+        "category": "Radiation (breast)",
+        "pattern": r"radiation (breast)"
+    },
+    {
+        "category": "Systolic Heart Failure",
+        "pattern": r"reduced ejection fraction"
+    },
+    {
+        "category": "Ischemic Cardiomyopathy and other cardiomyopathy",
+        "pattern": r"Ischemic Cardiomyopathy and other cardiomyopathy"
+    },
+    {
+        "category": "Coronary Artery Disease",
+        "pattern": r"atherosclerosis"
+    },
+    {
+        "category": "Diastolic Heart Failure",
+        "pattern": r"diagstolic heart failure"
+    },
+    {
+        "category": "Severe aortic stenosis",
+        "pattern": r"severe aortic stenosis"
+    },
+    {
+        "category": "Severe mitral regurgitation",
+        "pattern": r"svere mitral regurgitation"
+    },
+    {
+        "category": "Atrial fibrillation (ICD-10 I-48 group)",
+        "pattern": r"arrhythmia"
+    },
+    {
+        "category": "Severe pulmonary hypertension (RVSP > 60)",
+        "pattern": r"svere pulmonary hypertension"
+    },
+    {
+        "category": "Past Myocarditis",
+        "pattern": r"past myocarditis"
+    },
+    {
+        "category": "A1C > 9",
+        "pattern": r"diabetes mellitus"
+    },
+    {
+        "category": "Troponin > 0.02",
+        "pattern": r"AMI|NSTEMI|Acute Myocardial Infarction|STEMI"
+    },
+    {
+        "category": "Global Longitudinal Strain",
+        "pattern": r"subclinical LV dysfunction|global longitudinal strain|GLS"
+    },
+    {
+        "category": "Essential Hypertension",
+        "pattern": r"essential hypertension"
+    },
+    {
+        "category": "Diabetes Mellitus (1+2, exclude gestational & hospice)",
+        "pattern": r"hyperglycemia"
+    },
+    {
+        "category": "Age > 65",
+        "pattern": r"geriatric|senior|advanced age"
+    },
+    {
+        "category": "LDL =>190 and/or Xanthoma",
+        "pattern": r"hyperlipidemia, mixed|familiar hyperlipidemia"
+    },
+    {
+        "category": "HDL =<40",
+        "pattern": r"dyslipidemia"
+    },
+    {
+        "category": "BMI > 35",
+        "pattern": r"obesity"
+    },
+    {
+        "category": "EF 51%-54%",
+        "pattern": r"ejection fraction|LVEF|left ventricular ejection fraction"
+    },
+    {
+        "category": "Blood Pressure >= 140/90",
+        "pattern": r"hypertension"
+    },
+    {
+        "category": "Pro-BNP >= 400",
+        "pattern": r"congestive heart failure|fluid retention"
+    },
+    {
+        "category": "BNP > 100",
+        "pattern": r"congestive heart failure|fluid retention"
+    },
+    {
+        "category": "Current Smoker",
+        "pattern": r"current smoker"
+    },
+    {
+        "category": "Hyperlipidemia",
+        "pattern": r"dyslipidemia|familiar hyperlipidemia"
+    },
+    {
+        "category": "African-American race",
+        "pattern": r"african-american"
+    },
+    {
+        "category": "LDL 160 to 189",
+        "pattern": r"hyperlipidemia, mixed"
+    },
+    {
+        "category": "HDL 41 to 59",
+        "pattern": r"dyslipidemia"
+    },
+    {
+        "category": "Former Smoker",
+        "pattern": r"former smoker"
+    },
+    {
+        "category": "CART Cell Procedure",
+        "pattern": r"bone marrow transplantation"
+    }
+]
 
-    return terms_list
+
+def get_ruleset():
+    rule_set = [TargetRule(literal=rule.get("literal", ""),
+                           category=rule.get("category", ""),
+                           pattern=rule.get("pattern", None))
+                for rule in CARDIO_RULEBOOK]
+
+    return rule_set
 
 
 def run_in_parallel_cpu_bound(func, iterable, max_workers=None, disable=False, total=None, **kwargs):
@@ -56,25 +201,17 @@ def run_in_parallel_cpu_bound(func, iterable, max_workers=None, disable=False, t
 
 
 def get_medspacy_label(ent):
-    context_to_i2b2_label_map = {
-        "NEGATED_EXISTENCE": "absent",
-        'POSSIBLE_EXISTENCE': "possible",
-        "CONDITIONAL_EXISTENCE": "conditional",
-        "HYPOTHETICAL": "hypothetical",
-        'HISTORICAL': "historical",
-        'FAMILY': "associated_with_someone_else"
-    }
 
     modifiers_category = [mod.category for mod in ent._.modifiers]
-
     label = None
     if len(modifiers_category) == 0:
         # no modifiers, assume present
         label = "present"
     elif len(modifiers_category) == 1:
         # we have a single modifier, we report it
-        label = context_to_i2b2_label_map[modifiers_category[0]]
+        label = modifiers_category[0]  # context_to_i2b2_label_map[modifiers_category[0]]
     else:
+        modifiers_str = ", ".join(modifiers_category)
         # more than one modifier, we report the most frequent one
         # we decide an order of precedence
         # 1. absent
@@ -82,20 +219,20 @@ def get_medspacy_label(ent):
         # 3. hypothetical
         # 4. conditional
         # 5. not associated
-        if ent._.is_uncertain:
-            label = "possible"
-        elif ent._.is_negated:
-            label = "absent"
+        if ent._.is_negated:
+            label = "POSSIBLE_EXISTENCE"
+        elif ent._.is_uncertain:
+            label = "POSSIBLE_EXISTENCE"
         # currently we cannot handle conditional
         # elif ent._.is_conditional:
         #     label = "conditional"
         elif ent._.is_hypothetical:
-            label = "hypothetical"
+            label = "HYPOTHETICAL"
         # i2b2 does not have historical labels
         # elif ent._.is_historical:
         #     label = "historical"
         elif ent._.is_family:
-            label = "associated_with_someone_else"
+            label = "FAMILY"
 
     return label
 
@@ -104,10 +241,7 @@ def parse_value_from_sentence(sentence_text, label, matched_pattern):
     value = None
     if label in ["Global Longitudinal Strain",
                  "EF 51%-54%", ]:
-        value_patterns = [
-            re.compile(r'(\d{1,2}-\d{1,2})%'),
-            re.compile(r'(\d{1,2})%'),
-        ]
+
         pattern_index_in_sentence = sentence_text.find(matched_pattern)
         sentence_starting_with_matched_pattern = sentence_text[pattern_index_in_sentence:]
         for pattern in value_patterns:
@@ -123,41 +257,76 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     doc = medspacy_nlp(data_row[note_text_column])
 
     row_dict = data_row.to_dict()
-    note_hash = data_row["note_hash"]
-    # row_dict.pop(note_text_column, None)
-    results_list = []
-    if len(doc.ents) > 0:
-        for sentence in doc.sents:
-            for ent in sentence.ents:
-                sentence_text = sentence.text
-                matched_pattern = ent.text
-                label = ent.label_
-                assertion = get_medspacy_label(ent)
-                value = parse_value_from_sentence(sentence_text, label, matched_pattern)
+    note_id = data_row["note_id"]
 
-                ent_20_window_start = max(ent.start - 10, 0)
-                ent_20_window_end = min(ent.end + 10, len(sentence.doc))
-                window_context_20 = " ".join(
-                    [token.text for token in sentence.doc[ent_20_window_start:ent_20_window_end]])
+    value_pattern = re.compile(r'(\d{1,2}-\d{1,2})%|(\d{1,2})%')
 
-                prediction_id = f"{note_hash}_{ent.start}_{ent.end}"
+    prediction_list = []
+    for ent in doc.ents:
+        text = ent.text
+        label = ent.label_
+        assertion = get_medspacy_label(ent)
+        prediction_id = f"note_{note_id}_ent_{ent.start}_{ent.end}"
 
-                results_dict = {
-                    "context": window_context_20,
-                    "matched_pattern": matched_pattern,
-                    "label": label,
-                    "assertion": assertion,
-                    "value": value,
-                    **row_dict,
-                    "prediction_id": prediction_id,
+        prediction_dict = {
+            "value": {
+                "start": ent.start_char,
+                "end": ent.end_char,
+                "text": text,
+                "labels": [label, assertion],
+            },
+            "id": prediction_id,
+            "from_name": "label",
+            "to_name": "text",
+            "type": "labels",
+            "origin": "prediction",
+        }
+        prediction_list.append(prediction_dict)
 
+        if label in ["Global Longitudinal Strain",
+                     "EF 51%-54%", ]:
+            match = value_pattern.search(text[ent.start_char:])
+            if match:
+                value = match.group(1)
+                value_start = ent.start_char + match.start()
+                value_end = ent.start_char + match.end()
+                prediction_id = f"note_{note_id}_ent_{value_start}_{value_end}"
+                prediction_dict = {
+                    "value": {
+                        "start": ent.start_char + match.start(),
+                        "end": ent.start_char + match.end(),
+                        "text": value,
+                        "labels": ["value"],
+                    },
+                    "id": prediction_id,
+                    "from_name": "label",
+                    "to_name": "text",
+                    "type": "labels",
+                    "origin": "prediction",
                 }
-                results_list.append(results_dict)
-
-    return results_list
+                prediction_list.append(prediction_dict)
 
 
-def get_notes_df(spark, ids_list):
+
+    results_dict = {
+        "id": note_id,
+        "data": {
+            "num_predictions": len(prediction_list),
+            **row_dict
+        },
+        "predictions": [
+            {
+                "result": prediction_list,
+            }
+        ]
+    }
+
+    return results_dict
+
+
+def get_notes_df(spark):
+    ids_list = get_ids_of_interest(spark)
+
     in_clause = ",".join(map(lambda x: f"'{x}'", ids_list))
     table_name = "`hive_metastore`.`cardio_oncology`.`unstructured_notes`"
     total_rows = spark.sql(f"SELECT COUNT(*) FROM {table_name} WHERE PAT_ID IN ({in_clause})").collect()[0][0]
@@ -182,45 +351,57 @@ def get_ids_of_interest(spark):
 
     return ids_list
 
+def export_as_label_studio_format(doc_results_list, out_dir):
+    out_file_path = f"{out_dir}/cardio_notes.json"
+    results_list = [doc for doc in doc_results_list if len(doc) > 0]
+    with open(out_file_path, "w") as f:
+        json.dump(results_list, f, indent=2)
 
-def run_medspacy(notes_df, labels_list, out_dir):
-    nlp = medspacy.load(medspacy_enable=["medspacy_pyrush",
-                                         "medspacy_target_matcher",
-                                         "medspacy_context"])
+
+def run_medspacy(notes_df, rule_set, notes_column):
+
+    nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
-    target_rules = [TargetRule(literal=r[0].strip(), category=r[1]) for r in labels_list]
-    target_matcher.add(target_rules)
+    target_matcher.add(rule_set)
 
     notes_df["note_hash"] = notes_df["NOTE_TEXT"].apply(lambda x: hashlib.md5(x.encode()).hexdigest())
+    notes_df["note_id"] = range(len(notes_df))
+
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
-                                                     note_text_column="NOTE_TEXT")
-    doc_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
-                                         notes_df.iterrows(),
-                                         total=len(notes_df))
+                                                     note_text_column=notes_column)
+    doc_results_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
+                                                                 notes_df.iterrows(),
+                                                                 total=len(notes_df),
+                                                                 # max_workers=16
+                                                                 )
 
-    result_list = [result for doc in doc_list for result in doc if len(doc) > 0]
+    return doc_results_list
 
-    results_df = pd.DataFrame(result_list)
+def cardio_oncology_pipeline(notes_df):
+    project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
+    # remote dir shared
+    current_datetime_str = datetime.datetime.now().strftime("%Y%m%d")
+    out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
 
-    out_file = f"{out_dir}/results.csv"
-    results_df.to_csv(out_file, index=False)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
 
+    rule_set = get_ruleset()
 
-project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
-# remote dir shared
-current_datetime_str = datetime.datetime.now().strftime("%Y%m%d")
-out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
+    doc_results_list = run_medspacy(notes_df, rule_set, "NOTE_TEXT")
 
-if not os.path.exists(out_dir):
-    os.makedirs(out_dir)
-
-nlp_terms = load_terms(f"{project_dir}/nlp_terms.csv")
-ids_list = get_ids_of_interest(spark)
-notes_df = get_notes_df(spark, ids_list)
+    export_as_label_studio_format(doc_results_list, out_dir)
 
 
-notes_subset_df = notes_df.sample(1000)
-run_medspacy(notes_df, nlp_terms, out_dir)
+def main():
+    notes_df = get_notes_df(spark)
+
+    cardio_oncology_pipeline(notes_df)
+
+
+if __name__ == "__main__":
+    cardio_oncolgy_pipeline()
+
