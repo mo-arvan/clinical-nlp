@@ -18,9 +18,6 @@ import time
 from medspacy.ner import TargetRule
 from tqdm import tqdm
 
-
-
-
 CARDIO_RULEBOOK = [
     {
         "category": "Malignant Neoplasm of the Breast",
@@ -201,7 +198,6 @@ def run_in_parallel_cpu_bound(func, iterable, max_workers=None, disable=False, t
 
 
 def get_medspacy_label(ent):
-
     modifiers_category = [mod.category for mod in ent._.modifiers]
     label = None
     if len(modifiers_category) == 0:
@@ -252,7 +248,7 @@ def parse_value_from_sentence(sentence_text, label, matched_pattern):
     return value
 
 
-def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
+def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
     i, data_row = i_data_row
     doc = medspacy_nlp(data_row[note_text_column])
 
@@ -306,8 +302,6 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
                 }
                 prediction_list.append(prediction_dict)
 
-
-
     results_dict = {
         "id": note_id,
         "data": {
@@ -321,7 +315,12 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
         ]
     }
 
-    return results_dict
+    if results_dict["data"]["num_predictions"] > 0:
+        out_file_path = f"{out_dir}/{note_id}.json"
+        with open(out_file_path, "w") as f:
+            json.dump(results_dict, f, indent=2)
+
+    return
 
 
 def get_notes_df(spark):
@@ -351,6 +350,7 @@ def get_ids_of_interest(spark):
 
     return ids_list
 
+
 def export_as_label_studio_format(doc_results_list, out_dir):
     out_file_path = f"{out_dir}/cardio_notes.json"
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
@@ -359,7 +359,6 @@ def export_as_label_studio_format(doc_results_list, out_dir):
 
 
 def run_medspacy(notes_df, rule_set, notes_column):
-
     nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
@@ -368,17 +367,16 @@ def run_medspacy(notes_df, rule_set, notes_column):
     notes_df["note_hash"] = notes_df["NOTE_TEXT"].apply(lambda x: hashlib.md5(x.encode()).hexdigest())
     notes_df["note_id"] = range(len(notes_df))
 
-
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
-                                                     note_text_column=notes_column)
-    doc_results_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
-                                                                 notes_df.iterrows(),
-                                                                 total=len(notes_df),
-                                                                 # max_workers=16
-                                                                 )
+                                                     note_text_column=notes_column,
+                                                     out_dir=out_dir)
+    run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
+                              notes_df.iterrows(),
+                              total=len(notes_df),
+                              # max_workers=16
+                              )
 
-    return doc_results_list
 
 def cardio_oncology_pipeline(notes_df):
     project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
@@ -391,9 +389,7 @@ def cardio_oncology_pipeline(notes_df):
 
     rule_set = get_ruleset()
 
-    doc_results_list = run_medspacy(notes_df, rule_set, "NOTE_TEXT")
-
-    export_as_label_studio_format(doc_results_list, out_dir)
+    run_medspacy(notes_df, rule_set, "NOTE_TEXT")
 
 
 def main():
@@ -404,4 +400,3 @@ def main():
 
 if __name__ == "__main__":
     cardio_oncolgy_pipeline()
-
