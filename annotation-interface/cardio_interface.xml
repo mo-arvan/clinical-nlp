@@ -1,0 +1,50 @@
+<View>
+    <View style="box-shadow: 2px 2px 5px #999; padding: 20px; margin-top: 2em; border-radius: 5px;">
+        <Header value="Labels" size="12"/>
+        <Labels name="label" toName="text">
+            <Label value="Malignant Neoplasm of the Breast"/>
+            <Label value="Melanoma"/>
+            <Label value="Lung Cancer"/>
+            <Label value="Kidney Cancer"/>
+            <Label value="B-Cell Lymphoma"/>
+            <Label value="Radiation (breast)"/>
+            <Label value="Systolic Heart Failure"/>
+            <Label value="Ischemic Cardiomyopathy and other cardiomyopathy"/>
+            <Label value="Coronary Artery Disease"/>
+            <Label value="Diastolic Heart Failure"/>
+            <Label value="Severe aortic stenosis"/>
+            <Label value="Severe mitral regurgitation"/>
+            <Label value="Atrial fibrillation (ICD-10 I-48 group)"/>
+            <Label value="Severe pulmonary hypertension (RVSP &gt; 60)"/>
+            <Label value="Past Myocarditis"/>
+            <Label value="A1C &gt; 9"/>
+            <Label value="Troponin &gt; 0.02"/>
+            <Label value="Global Longitudinal Strain"/>
+            <Label value="GLS Value"/>
+            <Label value="Essential Hypertension"/>
+            <Label value="Diabetes Mellitus (1+2, exclude gestational  hospice)"/>
+            <Label value="Age &gt; 65"/>
+            <Label value="LDL =&gt;190 and/or Xanthoma"/>
+            <Label value="HDL =&lt;40"/>
+            <Label value="BMI &gt; 35"/>
+            <Label value="EF 51%-54%"/>
+            <Label value="EF Value"/>
+            <Label value="Blood Pressure &gt;= 140/90"/>
+            <Label value="Pro-BNP &gt;= 400"/>
+            <Label value="BNP &gt; 100"/>
+            <Label value="Current Smoker"/>
+            <Label value="Hyperlipidemia"/>
+            <Label value="African-American race"/>
+            <Label value="LDL 160 to 189"/>
+            <Label value="HDL 41 to 59"/>
+            <Label value="Former Smoker"/>
+            <Label value="CART Cell Procedure"/>
+            <Label value="present"/>
+            <Label value="absent"/>
+        </Labels>
+        <Header value="Report" size="12"/>
+        <Text name="text" value="$NOTE_TEXT"/>
+    </View>
+</View>
+        <!-- { "data": {"text": "This is a great 3D movie that delivers everything almost right in your face."}
+        } -->

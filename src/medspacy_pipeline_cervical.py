@@ -44,7 +44,7 @@ def get_medspacy_label(ent):
         "CONDITIONAL_EXISTENCE": "conditional",
         "HYPOTHETICAL": "hypothetical",
         'HISTORICAL': "historical",
-        'FAMILY': "associated_with_someone_else"
+        'FAMILY': "family"
     }
 
     modifiers_category = [mod.category for mod in ent._.modifiers]
@@ -77,7 +77,7 @@ def get_medspacy_label(ent):
         # elif ent._.is_historical:
         #     label = "historical"
         elif ent._.is_family:
-            label = "associated_with_someone_else"
+            label = "family"
 
     return label
 
@@ -269,6 +269,31 @@ def evaluate(predictions, labels_list):
     return result_df
 
 
+def sample_results(doc_results_list, k):
+    selected_results = []
+    selected_results_label_count_dict = {}
+    text_to_notes_dict = {}
+    for i, doc in enumerate(doc_results_list):
+        for prediction in doc["predictions"]:
+            result = prediction["result"]
+
+            for r in result:
+                text = r["value"]["text"]
+                if text not in text_to_notes_dict:
+                    text_to_notes_dict[text] = []
+                text_to_notes_dict[text].append(i)
+
+    text_to_notes_dict = dict(sorted(text_to_notes_dict.items(), key=lambda x: len(x[1])))
+
+    selected_notes = []
+    for text, notes in text_to_notes_dict.items():
+        for note_index in notes:
+            if note_index not in selected_notes:
+                selected_notes.append(note_index)
+    sampled_results = [doc_results_list[i] for i in selected_notes[:k]]
+    return sampled_results
+
+
 def export_as_label_studio_format(doc_results_list, out_dir):
     out_file_path = f"{out_dir}/cervical_notes_with_labels.json"
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
@@ -339,7 +364,9 @@ def main():
     # notes_df = notes_df.head(100)
     doc_results_list = run_medspacy(notes_df, rule_set, notes_column)
 
-    export_as_label_studio_format(doc_results_list, "artifacts/results/")
+    selected_notes = sample_results(doc_results_list)
+
+    export_as_label_studio_format(selected_notes, "artifacts/results/")
 
 
 if __name__ == '__main__':

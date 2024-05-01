@@ -96,7 +96,7 @@ CARDIO_RULEBOOK = [
         "pattern": r"essential hypertension"
     },
     {
-        "category": "Diabetes Mellitus (1+2, exclude gestational & hospice)",
+        "category": "Diabetes Mellitus (1+2, exclude gestational and hospice)",
         "pattern": r"hyperglycemia"
     },
     {
@@ -255,7 +255,7 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
     row_dict = data_row.to_dict()
     note_id = data_row["note_id"]
 
-    value_pattern = re.compile(r'(\d{1,2}-\d{1,2})%|(\d{1,2})%')
+    value_pattern = re.compile(r'(\d{1,2}-\d{1,2})%|(\d{1,2}(\.\d{1,2})?%)')
 
     prediction_list = []
     for ent in doc.ents:
@@ -281,18 +281,19 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
 
         if label in ["Global Longitudinal Strain",
                      "EF 51%-54%", ]:
-            match = value_pattern.search(text[ent.start_char:])
+            match = value_pattern.search(doc.text[ent.start_char:len(doc.text)])
             if match:
-                value = match.group(1)
+                value = match[0]
                 value_start = ent.start_char + match.start()
                 value_end = ent.start_char + match.end()
+                value_label = "GLS Value" if label == "Global Longitudinal Strain" else "EF Value"
                 prediction_id = f"note_{note_id}_ent_{value_start}_{value_end}"
                 prediction_dict = {
                     "value": {
-                        "start": ent.start_char + match.start(),
-                        "end": ent.start_char + match.end(),
+                        "start": value_start,
+                        "end": value_end,
                         "text": value,
-                        "labels": ["value"],
+                        "labels": [value_label],
                     },
                     "id": prediction_id,
                     "from_name": "label",
@@ -301,6 +302,8 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
                     "origin": "prediction",
                 }
                 prediction_list.append(prediction_dict)
+            # else:
+            #     print(f"Value not found for {label} in note {note_id}, text: {doc.text[ent.start_char:]}")
 
     results_dict = {
         "id": note_id,
@@ -315,12 +318,7 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
         ]
     }
 
-    if results_dict["data"]["num_predictions"] > 0:
-        out_file_path = f"{out_dir}/{note_id}.json"
-        with open(out_file_path, "w") as f:
-            json.dump(results_dict, f, indent=2)
-
-    return
+    return results_dict
 
 
 def get_notes_df(spark):
@@ -351,6 +349,58 @@ def get_ids_of_interest(spark):
     return ids_list
 
 
+def sample_results(doc_results_list, k):
+    selected_results = []
+    selected_results_label_count_dict = {}
+    text_to_notes_dict = {}
+    label_to_notes_dict = {}
+    for i, doc in enumerate(doc_results_list):
+        for prediction in doc["predictions"]:
+            result = prediction["result"]
+
+            for r in result:
+                text = r["value"]["text"]
+                label = r["value"]["labels"][0]
+                if text not in text_to_notes_dict:
+                    text_to_notes_dict[text] = []
+                text_to_notes_dict[text].append(i)
+                if label not in label_to_notes_dict:
+                    label_to_notes_dict[label] = []
+                label_to_notes_dict[label].append(i)
+
+    text_to_notes_dict = dict(sorted(text_to_notes_dict.items(), key=lambda x: len(x[1])))
+    label_to_notes_dict = dict(sorted(label_to_notes_dict.items(), key=lambda x: len(x[1])))
+    selected_notes = []
+    for label, notes in label_to_notes_dict.items():
+        for note_index in notes:
+            if note_index not in selected_notes:
+                selected_notes.append(note_index)
+            break
+    for label, notes in label_to_notes_dict.items():
+        for note_index in notes:
+            if note_index not in selected_notes:
+                selected_notes.append(note_index)
+    sampled_results = [doc_results_list[i] for i in selected_notes[:k]]
+    return sampled_results
+
+
+def report_results_label_count(doc_results_list, file_name):
+    labels_list = [l["category"] for l in CARDIO_RULEBOOK]
+    label_to_count_dict = {l: 0 for l in labels_list}
+    for doc in doc_results_list:
+        for prediction in doc["predictions"]:
+            result = prediction["result"]
+            for r in result:
+                label = r["value"]["labels"][0]
+                if label not in label_to_count_dict:
+                    label_to_count_dict[label] = 0
+                label_to_count_dict[label] += 1
+    label_count_df = pd.DataFrame(label_to_count_dict.items(), columns=["label", "count"])
+    label_count_df = label_count_df.sort_values("count", ascending=True)
+
+    label_count_df.to_csv(f"{file_name}", index=False)
+
+
 def export_as_label_studio_format(doc_results_list, out_dir):
     out_file_path = f"{out_dir}/cardio_notes.json"
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
@@ -358,7 +408,7 @@ def export_as_label_studio_format(doc_results_list, out_dir):
         json.dump(results_list, f, indent=2)
 
 
-def run_medspacy(notes_df, rule_set, notes_column):
+def run_medspacy(notes_df, rule_set, notes_column, out_dir):
     nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
@@ -371,11 +421,13 @@ def run_medspacy(notes_df, rule_set, notes_column):
                                                      medspacy_nlp=nlp,
                                                      note_text_column=notes_column,
                                                      out_dir=out_dir)
-    run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
-                              notes_df.iterrows(),
-                              total=len(notes_df),
-                              # max_workers=16
-                              )
+    doc_results_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
+                                                 notes_df.iterrows(),
+                                                 total=len(notes_df),
+                                                 # max_workers=16
+                                                 )
+
+    return doc_results_list
 
 
 def cardio_oncology_pipeline(notes_df):
@@ -383,20 +435,30 @@ def cardio_oncology_pipeline(notes_df):
     # remote dir shared
     current_datetime_str = datetime.datetime.now().strftime("%Y%m%d")
     out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
+    out_dir = f"{current_datetime_str}"
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     rule_set = get_ruleset()
 
-    run_medspacy(notes_df, rule_set, "NOTE_TEXT")
+    doc_results_list = run_medspacy(notes_df, rule_set, "NOTE_TEXT", out_dir)
+
+    report_results_label_count(doc_results_list, out_dir + "/label_count.csv")
+
+    sampled_results = sample_results(doc_results_list, 100)
+
+    report_results_label_count(sampled_results, out_dir + "/sampled_label_count.csv")
+    export_as_label_studio_format(sampled_results, out_dir)
 
 
 def main():
-    notes_df = get_notes_df(spark)
+    # notes_df = get_notes_df(spark)
 
+    notes_df = pd.read_parquet("notes_df.parquet")
+    # notes_df = notes_df.sample(1000)
     cardio_oncology_pipeline(notes_df)
 
 
 if __name__ == "__main__":
-    cardio_oncolgy_pipeline()
+    main()

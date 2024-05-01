@@ -1,0 +1,8 @@
+version: '3'
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./cardio-label-studio:/label-studio/data
