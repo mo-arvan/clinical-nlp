@@ -11,8 +11,22 @@ cervical_rulebook_definition = [
 
     },
     {
+    #     transformation zone component not identified
+        "category": "Transformation zone component not identified",
+        "pattern": r"(Satisfactory for evaluation; )?transformation zone component not identified"
+    },
+    {
         "category": "Negative/Normal/NILM",
-        "literal": "Negative for intraepithelial lesion or malignancy"
+        "pattern": r"((Negative for intraepithelial lesion or malignancy)|(Negative for carcinoma)|(Negative for hyperplasia and malignancy)|(Negative for dysplasia and malignancy))"
+    #     Negative for carcinoma
+        # Negative for carcinoma
+        # Negative for hyperplasia and malignancy
+        # Negative for dysplasia and malignancy
+
+    },
+    {
+        "category": "Negative for Carcinoma",
+        "literal": "Negative for carcinoma"
     },
     {
         "category": "Atypical Squamous Cells of undetermined Significance",
@@ -20,16 +34,22 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)",
-        "literal": "Atypical squamous cells, cannot exclude high grade squamous intraepithelial lesion (ASC-H)"
+        "pattern": r"Atypical squamous cells,? cannot exclude( a)? high(-| )grade squamous intraepithelial lesion \(ASC-H\)"
+    #     Atypical squamous cells cannot exclude a high-grade squamous intraepithelial lesion (ASC-H)
+        # Atypical squamous cells, cannot exclude a high-grade squamous intraepithelial lesion (ASC-H)
     },
     {
-        "category": "Low-grade squamous intraepithelial lesion (LSIL) ",
-        "pattern": r"Low grade squamous intraepithelial lesion (\(LSIL\))?"
+        "category": "Low-grade squamous intraepithelial lesion (LSIL)",
+        "pattern": r"Low(-| )grade squamous intraepithelial lesion( \(LSIL\))?"
+
+    #     low-grade squamous intraepithelial lesion (LSIL).
+        # low-grade squamous intraepithelial lesion
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HSIL)",
-        "literal": "High grade squamous intraepithelial lesion (HSIL). Cannot rule out squamous cell carcinoma"
+        "pattern": r"high(-| )grade squamous intraepithelial lesion( \(HSIL\))?(\. Cannot rule out squamous cell carcinoma)?"
         #     high-grade squamous intraepithelial lesion (ASC-H)
+    #     high grade squamous intraepithelial lesion (HSIL)
     },
     {
         "category": "Squamous Cell Carcinoma",
@@ -57,7 +77,9 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Endocervical adenocarcinoma in situ",
-        "literal": "Endocervical adenocarcinoma in situ"
+        "pattern": r"((Endocervical adenocarcinoma in(-| )situ)|(Adenocarcinoma in(-| )situ of cervix))"
+    #      Adenocarcinoma in-situ of cervix
+        # Adenocarcinoma in-situ cervix
     },
     {
         "category": "Adenocarcinoma",
@@ -89,7 +111,7 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Bacterial Vaginosis",
-        "literal": "Shift in flora suggestive of bacterial vaginosis"
+        "pattern": r"((Shift in flora suggestive of bacterial vaginosis)|(BACTERIAL VAGINOSIS HIGHLY SUGGESTIVE))"
     },
     {
         "category": "Actinomyces",
@@ -127,7 +149,7 @@ cervical_rulebook_definition = [
     },
     {
         "category": "HPV Positive",
-        "pattern": r"HPV\s+Positive"
+        "pattern": r"((HPV\s+Positive)|(POSITIVE FOR HIGH RISK HPV))"
     },
     {
         "category": "HPV 16 Positive",
@@ -151,16 +173,21 @@ cervical_rulebook_definition = [
     },
     {
         "category": "CIN 1",
-        "pattern": r"((mild dysplasia \(CIN I\))|(mild dysplasia)|(Low-grade squamous intraepithelial lesion))"
+        "pattern": r"((mild dysplasia \(CIN I\))|(mild dysplasia)|(Low(-| )grade squamous (intra)?epithelial lesion))"
+    #     low grade squamous epithelial lesion
     },
     {
         "category": "CIN 2",
         "pattern":
-            r"((moderate dysplasia \(CIN II\))|(moderate dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 2)|(high-grade squamous intraepithelial lesion))"
+            r"((moderate dysplasia \(CIN II\))|(moderate dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 2)|(high-grade squamous intraepithelial lesion)|(moderate grade dysplasia CIN II)|(HGSIL, high grade dysplasia CIN II))"
+    #     CIN II
+        # HGSIL, high grade dysplasia CIN II
+        # moderate grade dysplasia CIN II
     },
     {
         "category": "CIN3",
-        "pattern": r"((severe dysplasia \(CIN III\))|(severe dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 3)|(high-grade squamous intraepithelial lesion))"
+        "pattern": r"( (severe dysplasia \(CIN III\)) |(severe dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 3)|(high(-| )grade squamous intraepithelial lesion)|(CIN II-III)|(CIN III \(cervical intraepithelial neoplasia grade III\) with severe dysplasia)|(HGSIL, high grade dysplasia CIN II))"
+    #     high grade squamous intraepithelial lesion
     },
     {
         "category": "Histologic HSIL (unspecified)",
@@ -168,7 +195,9 @@ cervical_rulebook_definition = [
     },
     {
         "category": "AIS",
-        "literal": "adenocarcinoma in situ"
+        "pattern": r"((Adenocarcinoma in(-| )situ( \(AIS\))?)(( of)? cervix)?)"
+    #     Adenocarcinoma in-situ
+        #  Adenocarcinoma in-situ (AIS)
     },
     {
         "category": "Cancer NOS",

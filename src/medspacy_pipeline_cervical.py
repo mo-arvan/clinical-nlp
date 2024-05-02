@@ -7,6 +7,7 @@ import medspacy
 import numpy as np
 import pandas as pd
 from medspacy.ner import TargetRule
+import csv
 
 import parallel_helper
 from resources import cervical_rulebook
@@ -85,6 +86,9 @@ def get_medspacy_label(ent):
 def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     i, data_row = i_data_row
     doc = medspacy_nlp(data_row[note_text_column])
+
+    # if i == 234:
+    #     print("Debug")
 
     row_dict = data_row.to_dict()
     note_id = data_row["note_id"]
@@ -185,90 +189,6 @@ def calculate_precision_recall_f1(true_positives, false_positives, false_negativ
     return precision, recall, f1
 
 
-def evaluate(predictions, labels_list):
-    predictions = sorted(predictions, key=lambda x: (x[0], x[1], x[2]))
-    labels_list = sorted(labels_list, key=lambda x: (x[0], x[1], x[2]))
-
-    predictions_df = pd.DataFrame(predictions, columns=["file_name", "start", "end", "label"])
-    labels_df = pd.DataFrame(labels_list, columns=["file_name", "start", "end", "label"])
-
-    # rename label column to label_gold
-    labels_df = labels_df.rename(columns={"label": "label_gold"})
-    # rename label column to label_pred
-    predictions_df = predictions_df.rename(columns={"label": "label_pred"})
-
-    merged_df = pd.merge(labels_df, predictions_df, how="left", on=["file_name", "start", "end"])
-
-    for i, row in merged_df.iterrows():
-        matching_rows = merged_df.loc[(merged_df["file_name"] == row["file_name"]) &
-                                      (merged_df["start"] == row["start"]) &
-
-                                      (merged_df["end"] == row["end"])]
-        if len(matching_rows) > 1:
-            print(f"Found {len(matching_rows)} matching rows")
-            print(matching_rows)
-            print(row)
-            print("\n\n")
-            merged_df = merged_df.drop(matching_rows.index[1:])
-
-    labels_metrics = {}
-    label_set = list(set([l[3] for l in labels_list]))
-    label_set = sorted(label_set)
-
-    for label in label_set:
-        true_positives = np.count_nonzero(
-            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] == label))
-        false_positives = np.count_nonzero(
-            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] != label))
-        false_negatives = np.count_nonzero(
-            np.logical_and(merged_df["label_pred"] != label, merged_df["label_gold"] == label))
-
-        precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
-
-        labels_metrics[label] = {
-            "true_positives": true_positives,
-            "false_positives": false_positives,
-            "false_negatives": false_negatives,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1
-        }
-
-    true_positives = sum([v["true_positives"] for k, v in labels_metrics.items()])
-    false_positives = sum([v["false_positives"] for k, v in labels_metrics.items()])
-    false_negatives = sum([v["false_negatives"] for k, v in labels_metrics.items()])
-    precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
-
-    labels_metrics["micro"] = {
-        "true_positives": true_positives,
-        "false_positives": false_positives,
-        "false_negatives": false_negatives,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1
-    }
-
-    # micro average
-    labels_metrics["macro"] = {
-        "precision": np.mean([v["precision"] for k, v in labels_metrics.items()]),
-        "recall": np.mean([v["recall"] for k, v in labels_metrics.items()]),
-        "f1": np.mean([v["f1"] for k, v in labels_metrics.items()])
-    }
-
-    result_df = pd.DataFrame(labels_metrics).reset_index(names="label")
-
-    column_order = ["present", "absent", "possible", "conditional", "hypothetical", "associated_with_someone_else",
-                    "micro", "macro"]
-    result_df = result_df[column_order]
-
-    result_df = result_df.round(3)
-
-    result_df.to_csv("artifacts/results/medspacy_context.csv")
-    result_df.to_latex("artifacts/results/medspacy_context.tex")
-
-    return result_df
-
-
 def sample_results(doc_results_list, k):
     selected_results = []
     selected_results_label_count_dict = {}
@@ -317,7 +237,7 @@ def misc_func():
     print(missing_labels)
 
 
-def evaluate():
+def evaluate2():
     results_df.rename(columns={"label": "pred_label"}, inplace=True)
 
     results_df_joined = results_df.merge(cervical_labels, on=["prediction_id", "matched_pattern", "pred_label"],
@@ -351,22 +271,144 @@ def evaluate():
     labels_count.to_csv("artifacts/results/cervical_labels_count.csv", index=False)
 
 
+def evaluate(doc_results_list, cervical_labels):
+    prediction_list = [(doc["id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr) for doc in
+                       doc_results_list for
+                       prediction in doc["predictions"] for r in prediction["result"] for rr in r["value"]["labels"]]
+    gold_labels = [(l["data"]["note_id"], rr["value"]["start"], rr["value"]["end"], rr["value"]["text"], rrr) for l in
+                   cervical_labels for r
+                   in l["annotations"] for rr in r["result"] for rrr in rr["value"]["labels"]]
+
+    # filter assertion labels
+    assertion_labels = ["present", "absent",
+                        "possible", "conditional",
+                        "hypothetical", "associated_with_someone_else",
+                        "historical", "family"]
+
+    # prediction_list = sorted(prediction_list)
+    # gold_labels = sorted(gold_labels)
+
+    predictions_df = pd.DataFrame(prediction_list, columns=["file_id", "start", "end", "text", "label"])
+    labels_df = pd.DataFrame(gold_labels, columns=["file_id", "start", "end", "text", "label"])
+
+    labels_df = labels_df[~labels_df["label"].isin(assertion_labels)]
+    predictions_df = predictions_df[~predictions_df["label"].isin(assertion_labels)]
+
+    # rename label column to label_gold
+    labels_df = labels_df.rename(columns={"label": "label_gold", "text": "text_gold"})
+    # rename label column to label_pred
+    predictions_df = predictions_df.rename(columns={"label": "label_pred", "text": "text_pred"})
+
+    merged_df = pd.merge(labels_df, predictions_df, how="outer", on=["file_id", "start", "end"])
+
+    merged_df["correct"] = merged_df["label_gold"] == merged_df["label_pred"]
+
+    merged_df.to_csv("artifacts/results/cervical_eval_detail.csv", index=False,
+                     quoting=csv.QUOTE_NONNUMERIC)
+
+    # for i, row in merged_df.iterrows():
+    #     matching_rows = merged_df.loc[(merged_df["file_id"] == row["file_id"]) &
+    #                                   (merged_df["start"] == row["start"]) &
+    #                                   (merged_df["end"] == row["end"])]
+    #     if len(matching_rows) > 1:
+    #         print(f"Found {len(matching_rows)} matching rows")
+    #         print(matching_rows)
+    #         print(row)
+    #         print("\n\n")
+    #         merged_df = merged_df.drop(matching_rows.index[1:])
+
+    labels_set = set(merged_df["label_gold"].tolist() + merged_df["label_pred"].tolist())
+
+    # remove nan from the set
+    labels_set = {label for label in labels_set if label == label}
+    labels_set = sorted(labels_set)
+
+    columns = ["label", "true_positives", "false_positives", "false_negatives", "precision", "recall", "f1"]
+
+    metrics_list = []
+
+    for label in labels_set:
+        true_positives = np.count_nonzero(
+            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] == label))
+        false_positives = np.count_nonzero(
+            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] != label))
+        false_negatives = np.count_nonzero(
+            np.logical_and(merged_df["label_pred"] != label, merged_df["label_gold"] == label))
+
+        precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+
+        label_metric = {
+            "label": label,
+            "true_positives": true_positives,
+            "false_positives": false_positives,
+            "false_negatives": false_negatives,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1
+        }
+        metrics_list.append(label_metric)
+
+    true_positives = sum([m["true_positives"] for m in metrics_list])
+    false_positives = sum([m["false_positives"] for m in metrics_list])
+    false_negatives = sum([m["false_negatives"] for m in metrics_list])
+    precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+
+    micro_dict = {
+        "label": "micro",
+        "true_positives": true_positives,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+    # micro average
+    macro_dict = {
+        "label": "macro",
+        "precision": np.mean([m["precision"] for m in metrics_list]),
+        "recall": np.mean([m["recall"] for m in metrics_list]),
+        "f1": np.mean([m["f1"] for m in metrics_list])
+    }
+
+    metrics_list.append(micro_dict)
+    metrics_list.append(macro_dict)
+
+    result_df = pd.DataFrame(metrics_list, columns=columns)
+
+    result_df = result_df.round(3)
+
+    result_df.to_csv("artifacts/results/cervical_eval.csv")
+    result_df.to_latex("artifacts/results/cervical_eval.tex")
+
+    return result_df
+
+
 def main():
     run_time = time.strftime("%Y%m%d-%H%M%S")
     notes_df, rule_set, notes_column = read_cervical_data()
 
-    cervical_labels = pd.read_csv("datasets/cervical/cervical_labels.csv")
-    labeled_notes = set(cervical_labels["prediction_id"].apply(lambda x: int(x.split("_")[1])))
+    cervical_label_path = "datasets/cervical/cervical-labels.json"
 
-    notes_df = notes_df[notes_df["note_id"].isin(labeled_notes)]
+    with open(cervical_label_path, "r") as f:
+        cervical_labels = json.load(f)
+
+    labeled_note_ids = [note["data"]["note_id"] for note in cervical_labels]
+
+    # cervical_labels = pd.read_csv("datasets/cervical/cervical_labels.csv")
+    # labeled_notes = set(cervical_labels["prediction_id"].apply(lambda x: int(x.split("_")[1])))
+
+    notes_df = notes_df[notes_df["note_id"].isin(labeled_note_ids)]
 
     # slice the notes
     # notes_df = notes_df.head(100)
     doc_results_list = run_medspacy(notes_df, rule_set, notes_column)
 
-    selected_notes = sample_results(doc_results_list)
+    evaluate(doc_results_list, cervical_labels)
 
-    export_as_label_studio_format(selected_notes, "artifacts/results/")
+    # selected_notes = sample_results(doc_results_list, 100)
+
+    # export_as_label_studio_format(selected_notes, "artifacts/results/")
 
 
 if __name__ == '__main__':
