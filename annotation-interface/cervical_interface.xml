@@ -1,55 +1,57 @@
 <View>
     <View style="box-shadow: 2px 2px 5px #999; padding: 20px; margin-top: 2em; border-radius: 5px;">
-      <Header value="Labels" size="12"/>
+        <Header value="Labels" size="12"/>
         <Labels name="label" toName="text">
-            <Label value="Satisfactory for evaluation" background="#FF0000"/>
-            <Label value="Unsatisfactory for evaluation" background="#FFA500"/>
-            <Label value="Negative/Normal/NILM" background="#FF9900"/>
-            <Label value="Atypical Squamous Cells of undetermined Significance" background="#00FF00"/>
-            <Label value="Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)"
-                   background="#00FFFF"/>
-            <Label value="Low-grade squamous intraepithelial lesion (LSIL)" background="#0000FF"/>
-            <Label value="High-grade squamous intraepithelial lesion (HSIL)" background="#800080"/>
-            <Label value="Squamous Cell Carcinoma" background="#FF1493"/>
-            <Label value="Atypical endocervical cells" background="#FF6347"/>
-            <Label value="Atypical endometrial cells" background="#8A2BE2"/>
-            <Label value="Atypical glandular cells" background="#4B0082"/>
-            <Label value="Atypical endocervical cells (Favors neoplastic)" background="#008000"/>
-            <Label value="Atypical glandular cells (favors neoplastic)" background="#2E8B57"/>
-            <Label value="Endocervical adenocarcinoma in situ" background="#FF4500"/>
-            <Label value="Adenocarcinoma" background="#DC143C"/>
-            <Label value="Endocervical adenocarcinoma" background="#FF69B4"/>
-            <Label value="Endometrial adenocarcinoma" background="#C71585"/>
-            <Label value="Extrauterine adenocarcinoma" background="#800000"/>
-            <Label value="Adenocarcinoma NOS" background="#A52A2A"/>
-            <Label value="Trichomonas Vaginalis" background="#FFD700"/>
-            <Label value="Candida" background="#ADFF2F"/>
-            <Label value="Bacterial Vaginosis" background="#808080"/>
-            <Label value="Actinomyces" background="#DAA520"/>
-            <Label value="Herpes Simplex Virus" background="#FF8C00"/>
-            <Label value="Cytomegalovirus" background="#FF4500"/>
-            <Label value="HPV Negative" background="#00FF7F"/>
-            <Label value="HPV 16 Negative" background="#98FB98"/>
-            <Label value="HPV 18 Negative" background="#00FA9A"/>
-            <Label value="HPV Other Negative" background="#2E8B57"/>
-            <Label value="HPV 18/45 Negative" background="#00FF00"/>
-            <Label value="HPV Positive" background="#FF6347"/>
-            <Label value="HPV 16 Positive" background="#FFA500"/>
-            <Label value="HPV 18 Positive" background="#FFD700"/>
-            <Label value="HPV Other positive" background="#8A2BE2"/>
-            <Label value="HPV 18/45 positive" background="#800080"/>
-            <Label value="Benign" background="#FF4500"/>
-            <Label value="CIN 1" background="#DC143C"/>
-            <Label value="CIN 2" background="#FF69B4"/>
-            <Label value="CIN3" background="#C71585"/>
-            <Label value="Histologic HSIL (unspecified)" background="#A52A2A"/>
-            <Label value="AIS" background="#FF8C00"/>
-            <Label value="Cancer NOS" background="#DAA520"/>
-            <Label value="Small Cell Cancer" background="#FF0000"/>
-            <Label value="Squamous Cell Cancer" background="#FFFF00"/>
-            <Label value="Endometrial Cancer" background="#00FF00"/>
-            <Label value="Adenocarcinoma" background="#00FFFF"/>
-            <Label value="Vaginal squamous intraepithelial neoplasia" background="#0000FF"/>
+            <Label value="Satisfactory for evaluation"/>
+            <Label value="Unsatisfactory for evaluation"/>
+            <Label value="Transformation zone component not identified"/>
+            <Label value="Negative/Normal/NILM"/>
+            <Label value="Negative for Carcinoma"/>
+            <Label value="Atypical Squamous Cells of undetermined Significance"/>
+            <Label value="Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)"/>
+            <Label value="Low-grade squamous intraepithelial lesion (LSIL)"/>
+            <Label value="High-grade squamous intraepithelial lesion (HSIL)"/>
+            <Label value="High-grade squamous intraepithelial lesion (HGSIL)"/>
+            <Label value="Squamous Cell Carcinoma"/>
+            <Label value="Atypical endocervical cells"/>
+            <Label value="Atypical endometrial cells"/>
+            <Label value="Atypical glandular cells"/>
+            <Label value="Atypical endocervical cells (Favors neoplastic)"/>
+            <Label value="Atypical glandular cells (favors neoplastic)"/>
+            <Label value="Endocervical Adenocarcinoma in Situ (AIS)"/>
+            <Label value="Adenocarcinoma"/>
+            <Label value="Endocervical adenocarcinoma"/>
+            <Label value="Endometrial adenocarcinoma"/>
+            <Label value="Extrauterine adenocarcinoma"/>
+            <Label value="Adenocarcinoma NOS"/>
+            <Label value="Trichomonas Vaginalis"/>
+            <Label value="Candida"/>
+            <Label value="Bacterial Vaginosis"/>
+            <Label value="Actinomyces"/>
+            <Label value="Herpes Simplex Virus"/>
+            <Label value="Cytomegalovirus"/>
+            <Label value="HPV Negative"/>
+            <Label value="HPV 16 Negative"/>
+            <Label value="HPV 18 Negative"/>
+            <Label value="HPV Other Negative"/>
+            <Label value="HPV 18/45 Negative"/>
+            <Label value="HPV Positive"/>
+            <Label value="HPV 16 Positive"/>
+            <Label value="HPV 18 Positive"/>
+            <Label value="HPV Other positive"/>
+            <Label value="HPV 18/45 positive"/>
+            <Label value="Benign"/>
+            <Label value="CIN 1"/>
+            <Label value="CIN 2"/>
+            <Label value="CIN3"/>
+            <Label value="CIN 2-3"/>
+            <Label value="Histologic HSIL (unspecified)"/>
+            <Label value="Cancer NOS"/>
+            <Label value="Small Cell Cancer"/>
+            <Label value="Squamous Cell Cancer"/>
+            <Label value="Endometrial Cancer"/>
+            <Label value="Adenocarcinoma"/>
+            <Label value="Vaginal squamous intraepithelial neoplasia"/>
         </Labels>
         <Header value="HPV Result" size="12"/>
         <Text name="hpv_result" value="$HPV_TEST_RESULT"/>

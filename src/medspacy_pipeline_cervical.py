@@ -1,13 +1,14 @@
+import csv
 import functools
 import hashlib
 import json
+import random
 import time
 
 import medspacy
 import numpy as np
 import pandas as pd
 from medspacy.ner import TargetRule
-import csv
 
 import parallel_helper
 from resources import cervical_rulebook
@@ -135,7 +136,12 @@ def run_medspacy(notes_df, rule_set, notes_column):
     nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
-    target_matcher.add(rule_set)
+    for rule in rule_set:
+        try:
+            target_matcher.add(rule)
+        except Exception as e:
+            print(f"Failed to add rule {rule}")
+            print(e)
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
@@ -189,34 +195,72 @@ def calculate_precision_recall_f1(true_positives, false_positives, false_negativ
     return precision, recall, f1
 
 
-def sample_results(doc_results_list, k):
+def sample_results(test_results, valid_results, k):
     selected_results = []
     selected_results_label_count_dict = {}
     text_to_notes_dict = {}
-    for i, doc in enumerate(doc_results_list):
+    label_to_notes_dict = {}
+    id_to_labels_dict = {}
+    for i, doc in enumerate(test_results):
         for prediction in doc["predictions"]:
             result = prediction["result"]
 
             for r in result:
                 text = r["value"]["text"]
+                for label in r["value"]["labels"]:
+                    if label in ["present", "absent", "possible", "conditional", "hypothetical", "historical",
+                                 "family"]:
+                        continue
+                    if label not in label_to_notes_dict:
+                        label_to_notes_dict[label] = []
+                    label_to_notes_dict[label].append(i)
+
+                    if i not in id_to_labels_dict:
+                        id_to_labels_dict[i] = []
+                    id_to_labels_dict[i].append(label)
+
                 if text not in text_to_notes_dict:
                     text_to_notes_dict[text] = []
                 text_to_notes_dict[text].append(i)
 
     text_to_notes_dict = dict(sorted(text_to_notes_dict.items(), key=lambda x: len(x[1])))
+    label_to_notes_dict = dict(sorted(label_to_notes_dict.items(), key=lambda x: len(x[1])))
+    label_to_support = dict(zip(valid_results["label"], valid_results["support"]))
+    label_to_support = dict(sorted(label_to_support.items(), key=lambda x: x[1]))
 
-    selected_notes = []
-    for text, notes in text_to_notes_dict.items():
-        for note_index in notes:
-            if note_index not in selected_notes:
-                selected_notes.append(note_index)
-    sampled_results = [doc_results_list[i] for i in selected_notes[:k]]
+    max_per_label = 15
+
+    for label in label_to_support.keys():
+        if label in label_to_notes_dict:
+            l = min(max_per_label, len(label_to_notes_dict[label]))
+
+            selected_results.extend(random.sample(label_to_notes_dict[label], l))
+            if label not in selected_results_label_count_dict:
+                selected_results_label_count_dict[label] = 0
+            selected_results_label_count_dict[label] += l
+
+    selected_results = list(set(selected_results))
+
+    # selected_notes = []
+    # for text, notes in text_to_notes_dict.items():
+    #     for note_index in notes:
+    #         if note_index not in selected_notes:
+    #             selected_notes.append(note_index)
+    sampled_results = [test_results[i] for i in selected_results[:k]]
     return sampled_results
 
 
-def export_as_label_studio_format(doc_results_list, out_dir):
+def export_as_label_studio_format(doc_results_list, out_dir, remove_predictions=False):
     out_file_path = f"{out_dir}/cervical_notes_with_labels.json"
+    out_file_with_pred_path = f"{out_dir}/cervical_notes_with_labels_with_pred.json"
+
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
+
+    with open(out_file_with_pred_path, "w") as f:
+        json.dump(doc_results_list, f, indent=2)
+    if remove_predictions:
+        for i, doc in enumerate(results_list):
+            results_list[i]["predictions"] = []
     with open(out_file_path, "w") as f:
         json.dump(results_list, f, indent=2)
 
@@ -271,7 +315,64 @@ def evaluate2():
     labels_count.to_csv("artifacts/results/cervical_labels_count.csv", index=False)
 
 
-def evaluate(doc_results_list, cervical_labels):
+# Function to determine if two spans intersect
+def do_intersect(start1, end1, start2, end2):
+    return max(start1, start2) <= min(end1, end2)
+
+
+# Function to find matches according to the new criteria
+def classify_matches(labels_df, predictions_df):
+    labels_df = labels_df.copy()
+    predictions_df = predictions_df.copy()
+    tp, fp, fn = 0, 0, 0
+    classification_report = []
+    # Check each prediction
+    for _, pred_row in predictions_df.iterrows():
+        match_found = False
+        for index, true_row in labels_df.iterrows():
+            if (pred_row['file_id'] == true_row['file_id'] and
+                    pred_row['label_pred'] == true_row['label_gold'] and
+                    do_intersect(pred_row['start'], pred_row['end'], true_row['start'], true_row['end'])):
+                match_found = True
+                labels_df.drop(index, inplace=True)  # Remove to avoid double counting
+                tp += 1
+                classification_report.append(
+                    {'file_id': pred_row['file_id'],
+                     'label': pred_row['label_pred'],
+                     "classification": "true_positive",
+                     "pred_start": pred_row['start'],
+                     "pred_end": pred_row['end'],
+                     "gold_start": true_row['start'],
+                     "gold_end": true_row['end'],
+                     "pred_text": pred_row['text_pred'],
+                     "gold_text": true_row['text_gold']})
+                break
+        if not match_found:
+            fp += 1
+            classification_report.append({
+                'file_id': pred_row['file_id'],
+                'label': pred_row['label_pred'],
+                "classification": "false_positive",
+                "pred_start": pred_row['start'],
+                "pred_end": pred_row['end'],
+                "pred_text": pred_row['text_pred']
+            })
+    # Remaining entries are false negatives
+    fn = len(labels_df)
+    for _, fn_row in labels_df.iterrows():
+        classification_report.append({
+            'file_id': fn_row['file_id'],
+            'label': fn_row['label_gold'],
+            "classification": "false_negative",
+            "gold_start": fn_row['start'],
+            "gold_end": fn_row['end'],
+            "gold_text": fn_row['text_gold']
+        })
+
+    return tp, fp, fn, classification_report
+
+
+def evaluate(doc_results_list, cervical_labels, eval_set="test"):
     prediction_list = [(doc["id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr) for doc in
                        doc_results_list for
                        prediction in doc["predictions"] for r in prediction["result"] for rr in r["value"]["labels"]]
@@ -299,12 +400,22 @@ def evaluate(doc_results_list, cervical_labels):
     # rename label column to label_pred
     predictions_df = predictions_df.rename(columns={"label": "label_pred", "text": "text_pred"})
 
-    merged_df = pd.merge(labels_df, predictions_df, how="outer", on=["file_id", "start", "end"])
+    # merged_df = pd.merge(labels_df, predictions_df, how="outer", on=["file_id", "start", "end"])
+    # remove nan from the set
+    labels_set = set(labels_df["label_gold"].tolist() + predictions_df["label_pred"].tolist())
+    labels_set = {label for label in labels_set if label == label}
+    labels_set = sorted(labels_set)
 
-    merged_df["correct"] = merged_df["label_gold"] == merged_df["label_pred"]
+    tp, fp, fn, classification_report = classify_matches(labels_df, predictions_df)
 
-    merged_df.to_csv("artifacts/results/cervical_eval_detail.csv", index=False,
-                     quoting=csv.QUOTE_NONNUMERIC)
+    # merged_df["correct"] = merged_df["label_gold"] == merged_df["label_pred"]
+
+    classification_report_df = pd.DataFrame(classification_report)
+    classification_report_df.to_csv(f"artifacts/results/cervical_classification_report_{eval_set}.csv",
+                                    index=False,
+                                    quoting=csv.QUOTE_NONNUMERIC)
+    # merged_df.to_csv(f"artifacts/results/cervical_eval_detail_{eval_set}.csv", index=False,
+    #                  quoting=csv.QUOTE_NONNUMERIC)
 
     # for i, row in merged_df.iterrows():
     #     matching_rows = merged_df.loc[(merged_df["file_id"] == row["file_id"]) &
@@ -317,23 +428,30 @@ def evaluate(doc_results_list, cervical_labels):
     #         print("\n\n")
     #         merged_df = merged_df.drop(matching_rows.index[1:])
 
-    labels_set = set(merged_df["label_gold"].tolist() + merged_df["label_pred"].tolist())
 
-    # remove nan from the set
-    labels_set = {label for label in labels_set if label == label}
-    labels_set = sorted(labels_set)
 
-    columns = ["label", "true_positives", "false_positives", "false_negatives", "precision", "recall", "f1"]
+
+    columns = ["label", "true_positives", "false_positives", "false_negatives",
+               "support", "precision", "recall", "f1"]
 
     metrics_list = []
 
     for label in labels_set:
-        true_positives = np.count_nonzero(
-            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] == label))
-        false_positives = np.count_nonzero(
-            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] != label))
-        false_negatives = np.count_nonzero(
-            np.logical_and(merged_df["label_pred"] != label, merged_df["label_gold"] == label))
+        # true_positives = np.count_nonzero(
+        #     np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] == label))
+        # false_positives = np.count_nonzero(
+        #     np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] != label))
+        # false_negatives = np.count_nonzero(
+        #     np.logical_and(merged_df["label_pred"] != label, merged_df["label_gold"] == label))
+
+        true_positives = len(classification_report_df[(classification_report_df["label"] == label) &
+                                                      (classification_report_df["classification"] == "true_positive")])
+        false_positives = len(classification_report_df[(classification_report_df["label"] == label) &
+                                                       (classification_report_df[
+                                                            "classification"] == "false_positive")])
+        false_negatives = len(classification_report_df[(classification_report_df["label"] == label) &
+                                                       (classification_report_df[
+                                                            "classification"] == "false_negative")])
 
         precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
 
@@ -342,6 +460,7 @@ def evaluate(doc_results_list, cervical_labels):
             "true_positives": true_positives,
             "false_positives": false_positives,
             "false_negatives": false_negatives,
+            "support": true_positives + false_negatives,
             "precision": precision,
             "recall": recall,
             "f1": f1
@@ -358,6 +477,7 @@ def evaluate(doc_results_list, cervical_labels):
         "true_positives": true_positives,
         "false_positives": false_positives,
         "false_negatives": false_negatives,
+        "support": true_positives + false_negatives,
         "precision": precision,
         "recall": recall,
         "f1": f1
@@ -371,15 +491,19 @@ def evaluate(doc_results_list, cervical_labels):
         "f1": np.mean([m["f1"] for m in metrics_list])
     }
 
-    metrics_list.append(micro_dict)
-    metrics_list.append(macro_dict)
+    # metrics_list.append(micro_dict)
+    # metrics_list.append(macro_dict)
 
     result_df = pd.DataFrame(metrics_list, columns=columns)
-
+    micro_macro_df = pd.DataFrame([micro_dict, macro_dict], columns=columns)
     result_df = result_df.round(3)
+    micro_macro_df = micro_macro_df.round(3)
 
-    result_df.to_csv("artifacts/results/cervical_eval.csv")
-    result_df.to_latex("artifacts/results/cervical_eval.tex")
+    result_df.to_csv(f"artifacts/results/cervical_eval_{eval_set}.csv")
+    result_df.to_latex(f"artifacts/results/cervical_eval_{eval_set}.tex")
+
+    micro_macro_df.to_csv(f"artifacts/results/cervical_micro_macro_{eval_set}.csv")
+    micro_macro_df.to_latex(f"artifacts/results/cervical_micro_macro_{eval_set}.tex")
 
     return result_df
 
@@ -388,27 +512,38 @@ def main():
     run_time = time.strftime("%Y%m%d-%H%M%S")
     notes_df, rule_set, notes_column = read_cervical_data()
 
-    cervical_label_path = "datasets/cervical/cervical-labels.json"
+    cervical_validation_set = "datasets/cervical/cervical-validation.json"
+    test_set_labels = "datasets/cervical/cervical-test.json"
 
-    with open(cervical_label_path, "r") as f:
-        cervical_labels = json.load(f)
+    with open(cervical_validation_set, "r") as f:
+        validation_labels = json.load(f)
 
-    labeled_note_ids = [note["data"]["note_id"] for note in cervical_labels]
+    with open(test_set_labels, "r") as f:
+        test_set_labels = json.load(f)
+
+    validation_set_ids = [note["data"]["note_id"] for note in validation_labels]
+    test_set_ids = [note["data"]["note_id"] for note in test_set_labels]
 
     # cervical_labels = pd.read_csv("datasets/cervical/cervical_labels.csv")
     # labeled_notes = set(cervical_labels["prediction_id"].apply(lambda x: int(x.split("_")[1])))
 
-    notes_df = notes_df[notes_df["note_id"].isin(labeled_note_ids)]
+    valid_df = notes_df[notes_df["note_id"].isin(validation_set_ids)]
+    test_df = notes_df[notes_df["note_id"].isin(test_set_ids)]
+    rest_df = notes_df[~notes_df["note_id"].isin(validation_set_ids + test_set_ids)]
+
+    # test_df = test_df.head(100)
 
     # slice the notes
     # notes_df = notes_df.head(100)
-    doc_results_list = run_medspacy(notes_df, rule_set, notes_column)
+    valid_results = run_medspacy(valid_df, rule_set, notes_column)
+    test_results = run_medspacy(test_df, rule_set, notes_column)
 
-    evaluate(doc_results_list, cervical_labels)
+    valid_metrics = evaluate(valid_results, validation_labels, eval_set="valid")
+    test_metrics = evaluate(test_results, test_set_labels, eval_set="test")
 
-    # selected_notes = sample_results(doc_results_list, 100)
-
-    # export_as_label_studio_format(selected_notes, "artifacts/results/")
+    # selected_notes = sample_results(test_results, valid_metrics, 200)
+    #
+    # export_as_label_studio_format(selected_notes, "artifacts/results/", remove_predictions=True)
 
 
 if __name__ == '__main__':

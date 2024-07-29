@@ -4,24 +4,24 @@
 """
 
 import concurrent.futures
+import csv
 import datetime
 import functools
 import hashlib
 import json
+import os
+import re
+
 import medspacy
 import numpy as np
-import os
 import pandas as pd
-import re
-import time
-
 from medspacy.ner import TargetRule
 from tqdm import tqdm
 
 CARDIO_RULEBOOK = [
     {
         "category": "Malignant Neoplasm of the Breast",
-        "pattern": r"breast cancer"
+        "pattern": r"breast cancer|chemo|chemotherapy|intraductal carcinoma|(malignant )?neoplasm"
     },
     {
         "category": "Melanoma",
@@ -29,7 +29,7 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "Lung Cancer",
-        "pattern": r"lung adenocarcinoma|squamous cell lung carcinoma"
+        "pattern": r"lung adenocarcinoma|squamous cell lung carcinoma|lung cancer|Neoplasm|chemotherapy"
     },
     {
         "category": "Kidney Cancer",
@@ -37,7 +37,7 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "B-Cell Lymphoma",
-        "pattern": r"hematological malignancy"
+        "pattern": r"hematological malignancy|chemotherapy|chemo|Neoplasm|chemotherapy|R-CHOP"
     },
     {
         "category": "Radiation (breast)",
@@ -45,7 +45,7 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "Systolic Heart Failure",
-        "pattern": r"reduced ejection fraction"
+        "pattern": r"Systolic heart failure|CHF|chronic systolic \(congestive\) heart failure|Congestive heart failure"
     },
     {
         "category": "Ischemic Cardiomyopathy and other cardiomyopathy",
@@ -57,7 +57,15 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "Diastolic Heart Failure",
-        "pattern": r"diagstolic heart failure"
+        "pattern": r"diagstolic heart failure|diastolic dysfunction|diastolic heart failure|hypokinesis|CHF|\(?congestive\)? heart failure"
+        # hypokinesis
+        # b/l LE pitting edema
+        # (congestive) heart failure
+        # Congestive heart failure
+        # CHF
+        # (congestive) heart failure
+        # Congestive heart failure
+        # CHF
     },
     {
         "category": "Severe aortic stenosis",
@@ -65,7 +73,7 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "Severe mitral regurgitation",
-        "pattern": r"svere mitral regurgitation"
+        "pattern": r"severe mitral regurgitation"
     },
     {
         "category": "Atrial fibrillation (ICD-10 I-48 group)",
@@ -73,7 +81,7 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "Severe pulmonary hypertension (RVSP > 60)",
-        "pattern": r"svere pulmonary hypertension"
+        "pattern": r"severe pulmonary hypertension"
     },
     {
         "category": "Past Myocarditis",
@@ -117,7 +125,7 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "EF 51%-54%",
-        "pattern": r"ejection fraction|LVEF|left ventricular ejection fraction"
+        "pattern": r"(left ventricular |reduced )?ejection fraction|(LV|(?<= ))EF(?= )"
     },
     {
         "category": "Blood Pressure >= 140/90",
@@ -137,7 +145,7 @@ CARDIO_RULEBOOK = [
     },
     {
         "category": "Hyperlipidemia",
-        "pattern": r"dyslipidemia|familiar hyperlipidemia"
+        "pattern": r"dyslipidemia|familiar hyperlipidemia|hyperlipidemia|hypertriglyceridemia"
     },
     {
         "category": "African-American race",
@@ -216,7 +224,7 @@ def get_medspacy_label(ent):
         # 4. conditional
         # 5. not associated
         if ent._.is_negated:
-            label = "POSSIBLE_EXISTENCE"
+            label = "NEGATED_EXISTENCE"
         elif ent._.is_uncertain:
             label = "POSSIBLE_EXISTENCE"
         # currently we cannot handle conditional
@@ -250,10 +258,13 @@ def parse_value_from_sentence(sentence_text, label, matched_pattern):
 
 def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
     i, data_row = i_data_row
-    doc = medspacy_nlp(data_row[note_text_column])
-
     row_dict = data_row.to_dict()
     note_id = data_row["note_id"]
+    #
+    if note_id == 2:
+        pass
+
+    doc = medspacy_nlp(data_row[note_text_column])
 
     value_pattern = re.compile(r'(\d{1,2}-\d{1,2})%|(\d{1,2}(\.\d{1,2})?%)')
 
@@ -350,6 +361,11 @@ def get_ids_of_interest(spark):
 
 
 def sample_results(doc_results_list, k):
+    desired_labels = ["Global Longitudinal Strain",
+                      "EF 51%-54%", ]
+
+    doc_results_list = [doc for doc in doc_results_list if [r for r in doc["predictions"] for rr in r["result"] if
+                                                            rr["value"]["labels"][0] in desired_labels]]
     selected_results = []
     selected_results_label_count_dict = {}
     text_to_notes_dict = {}
@@ -409,13 +425,30 @@ def export_as_label_studio_format(doc_results_list, out_dir):
 
 
 def run_medspacy(notes_df, rule_set, notes_column, out_dir):
-    nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
+    nlp = medspacy.load(medspacy_enable=[
+        "medspacy_pyrush",
+        "medspacy_target_matcher",
+        "medspacy_context"
+    ])
+    # nlp.add_pipe(
+    #     "medspacy_target_matcher",
+    #     config={
+    #         "phrase_matcher_attr": "LOWER",
+    #         "prune": False,
+    #     }
+    #
+    # )
+    # matcher = MedspacyMatcher(nlp, prune=False)
+    # matcher = MedspacyMatcher(nlp, name="medspacy_target_matcher", phrase_matcher_attr="LOWER", prune=False)
 
+    # nlp.add_pipe(matcher)
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
     target_matcher.add(rule_set)
+    target_matcher._prune = False
+    # nlp = matcher
 
     notes_df["note_hash"] = notes_df["NOTE_TEXT"].apply(lambda x: hashlib.md5(x.encode()).hexdigest())
-    notes_df["note_id"] = range(len(notes_df))
+    # notes_df["note_id"] = range(len(notes_df))
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
@@ -430,6 +463,143 @@ def run_medspacy(notes_df, rule_set, notes_column, out_dir):
     return doc_results_list
 
 
+def calculate_precision_recall_f1(true_positives, false_positives, false_negatives):
+    if true_positives + false_positives == 0:
+        precision = 0
+    else:
+        precision = true_positives / (true_positives + false_positives)
+    if true_positives + false_negatives == 0:
+        recall = 0
+    else:
+        recall = true_positives / (true_positives + false_negatives)
+    if precision + recall == 0:
+        f1 = 0
+    else:
+        f1 = 2 * precision * recall / (precision + recall)
+
+    return precision, recall, f1
+
+
+def evaluate(doc_results_list, cervical_labels, out_name="cardio_eval"):
+    prediction_list = [(doc["data"]["note_id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr) for doc
+                       in
+                       doc_results_list for
+                       prediction in doc["predictions"] for r in prediction["result"] for rr in r["value"]["labels"]]
+    gold_labels = [(l["data"]["note_id"], rr["value"]["start"], rr["value"]["end"], rr["value"]["text"], rrr) for l in
+                   cervical_labels for r
+                   in l["annotations"] for rr in r["result"] for rrr in rr["value"]["labels"]]
+
+    # filter assertion labels
+    assertion_labels = ["present", "absent",
+                        "possible", "conditional",
+                        "hypothetical", "associated_with_someone_else",
+                        "historical", "family",
+                        "negated_existence", "possible_existence",
+                        ]
+
+    assertion_upper = [a.upper() for a in assertion_labels]
+
+    assertion_labels += assertion_upper
+
+    # prediction_list = sorted(prediction_list)
+    # gold_labels = sorted(gold_labels)
+
+    predictions_df = pd.DataFrame(prediction_list, columns=["file_id", "start", "end", "text", "label"])
+    labels_df = pd.DataFrame(gold_labels, columns=["file_id", "start", "end", "text", "label"])
+
+    labels_df = labels_df[~labels_df["label"].isin(assertion_labels)]
+    predictions_df = predictions_df[~predictions_df["label"].isin(assertion_labels)]
+
+    # rename label column to label_gold
+    labels_df = labels_df.rename(columns={"label": "label_gold", "text": "text_gold"})
+    # rename label column to label_pred
+    predictions_df = predictions_df.rename(columns={"label": "label_pred", "text": "text_pred"})
+
+    merged_df = pd.merge(labels_df, predictions_df, how="outer", on=["file_id", "start", "end"])
+
+    merged_df["correct"] = merged_df["label_gold"] == merged_df["label_pred"]
+
+    merged_df.to_csv(f"artifacts/results/{out_name}_all.csv", index=False,
+                     quoting=csv.QUOTE_NONNUMERIC)
+
+    # for i, row in merged_df.iterrows():
+    #     matching_rows = merged_df.loc[(merged_df["file_id"] == row["file_id"]) &
+    #                                   (merged_df["start"] == row["start"]) &
+    #                                   (merged_df["end"] == row["end"])]
+    #     if len(matching_rows) > 1:
+    #         print(f"Found {len(matching_rows)} matching rows")
+    #         print(matching_rows)
+    #         print(row)
+    #         print("\n\n")
+    #         merged_df = merged_df.drop(matching_rows.index[1:])
+
+    labels_set = set(merged_df["label_gold"].tolist() + merged_df["label_pred"].tolist())
+
+    # remove nan from the set
+    labels_set = {label for label in labels_set if label == label}
+    labels_set = sorted(labels_set)
+
+    columns = ["label", "true_positives", "false_positives", "false_negatives", "precision", "recall", "f1"]
+
+    metrics_list = []
+
+    for label in labels_set:
+        true_positives = np.count_nonzero(
+            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] == label))
+        false_positives = np.count_nonzero(
+            np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] != label))
+        false_negatives = np.count_nonzero(
+            np.logical_and(merged_df["label_pred"] != label, merged_df["label_gold"] == label))
+
+        precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+
+        label_metric = {
+            "label": label,
+            "true_positives": true_positives,
+            "false_positives": false_positives,
+            "false_negatives": false_negatives,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1
+        }
+        metrics_list.append(label_metric)
+
+    true_positives = sum([m["true_positives"] for m in metrics_list])
+    false_positives = sum([m["false_positives"] for m in metrics_list])
+    false_negatives = sum([m["false_negatives"] for m in metrics_list])
+    precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+
+    micro_dict = {
+        "label": "micro",
+        "true_positives": true_positives,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+    # micro average
+    macro_dict = {
+        "label": "macro",
+        "precision": np.mean([m["precision"] for m in metrics_list]),
+        "recall": np.mean([m["recall"] for m in metrics_list]),
+        "f1": np.mean([m["f1"] for m in metrics_list])
+    }
+
+    metrics_list.append(micro_dict)
+    metrics_list.append(macro_dict)
+
+    result_df = pd.DataFrame(metrics_list, columns=columns)
+
+    result_df = result_df.round(3)
+
+    result_df.to_csv(f"artifacts/results/{out_name}.csv")
+    result_df.to_latex(f"artifacts/results/{out_name}.tex")
+
+    return result_df
+
+
 def cardio_oncology_pipeline(notes_df):
     project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
     # remote dir shared
@@ -437,12 +607,23 @@ def cardio_oncology_pipeline(notes_df):
     out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
     out_dir = f"{current_datetime_str}"
 
+    annotated_data_path = "datasets/cardio-oncology/annotated-data-20240510.json"
+
+    with open(annotated_data_path, "r") as f:
+        annotated_data = json.load(f)
+
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     rule_set = get_ruleset()
 
+    note_id_list = [note["data"]["note_id"] for note in annotated_data]
+
+    # notes_df = notes_df[notes_df["note_id"].isin(note_id_list)]
+
     doc_results_list = run_medspacy(notes_df, rule_set, "NOTE_TEXT", out_dir)
+
+    evaluate(doc_results_list, annotated_data)
 
     report_results_label_count(doc_results_list, out_dir + "/label_count.csv")
 
