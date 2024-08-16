@@ -428,9 +428,6 @@ def evaluate(doc_results_list, cervical_labels, eval_set="test"):
     #         print("\n\n")
     #         merged_df = merged_df.drop(matching_rows.index[1:])
 
-
-
-
     columns = ["label", "true_positives", "false_positives", "false_negatives",
                "support", "precision", "recall", "f1"]
 
@@ -508,6 +505,32 @@ def evaluate(doc_results_list, cervical_labels, eval_set="test"):
     return result_df
 
 
+def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
+    predicted_columns = [r.category for r in rule_set]
+
+    out_file_path = f"{out_dir}/cervical_notes_human_readable.csv"
+    out_file_with_pred_path = f"{out_dir}/cervical_notes_human_readable_with_pred.csv"
+
+    export_list = []
+
+    for doc in doc_results_list:
+        doc_row = doc["data"].copy()
+        doc_results = doc["predictions"][0]["result"]
+        for pred_column in predicted_columns:
+            matching_results = next(filter(lambda x: pred_column in x["value"]["labels"], doc_results), None)
+            if matching_results:
+                doc_row[pred_column] = "Yes"
+            else:
+                doc_row[pred_column] = "No"
+        export_list.append(doc_row)
+
+    export_df = pd.DataFrame(export_list)
+
+    export_df.to_csv(out_file_with_pred_path, index=False)
+    export_df.to_excel(out_file_with_pred_path.replace(".csv", ".xlsx"), index=False)
+
+
+
 def main():
     run_time = time.strftime("%Y%m%d-%H%M%S")
     notes_df, rule_set, notes_column = read_cervical_data()
@@ -544,6 +567,7 @@ def main():
     # selected_notes = sample_results(test_results, valid_metrics, 200)
     #
     # export_as_label_studio_format(selected_notes, "artifacts/results/", remove_predictions=True)
+    export_as_human_readable_format(test_results, rule_set, "artifacts/results/")
 
 
 if __name__ == '__main__':
