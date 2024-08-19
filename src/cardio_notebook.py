@@ -607,7 +607,7 @@ def cardio_oncology_pipeline(notes_df):
     out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
     out_dir = f"{current_datetime_str}"
 
-    annotated_data_path = "datasets/cardio-oncology/annotated-data-20240510.json"
+    annotated_data_path = "datasets/cardio-oncology/cardio-validation.json"
 
     with open(annotated_data_path, "r") as f:
         annotated_data = json.load(f)
@@ -619,7 +619,7 @@ def cardio_oncology_pipeline(notes_df):
 
     note_id_list = [note["data"]["note_id"] for note in annotated_data]
 
-    # notes_df = notes_df[notes_df["note_id"].isin(note_id_list)]
+    notes_df = notes_df[notes_df["note_id"].isin(note_id_list)]
 
     doc_results_list = run_medspacy(notes_df, rule_set, "NOTE_TEXT", out_dir)
 
