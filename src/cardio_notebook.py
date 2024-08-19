@@ -206,16 +206,25 @@ def run_in_parallel_cpu_bound(func, iterable, max_workers=None, disable=False, t
 
 
 def get_medspacy_label(ent):
+    context_to_i2b2_label_map = {
+        "NEGATED_EXISTENCE": "absent",
+        'POSSIBLE_EXISTENCE': "possible",
+        "CONDITIONAL_EXISTENCE": "conditional",
+        "HYPOTHETICAL": "hypothetical",
+        'HISTORICAL': "historical",
+        'FAMILY': "family"
+    }
+
     modifiers_category = [mod.category for mod in ent._.modifiers]
+
     label = None
     if len(modifiers_category) == 0:
         # no modifiers, assume present
         label = "present"
     elif len(modifiers_category) == 1:
         # we have a single modifier, we report it
-        label = modifiers_category[0]  # context_to_i2b2_label_map[modifiers_category[0]]
+        label = context_to_i2b2_label_map[modifiers_category[0]]
     else:
-        modifiers_str = ", ".join(modifiers_category)
         # more than one modifier, we report the most frequent one
         # we decide an order of precedence
         # 1. absent
@@ -223,22 +232,23 @@ def get_medspacy_label(ent):
         # 3. hypothetical
         # 4. conditional
         # 5. not associated
-        if ent._.is_negated:
-            label = "NEGATED_EXISTENCE"
-        elif ent._.is_uncertain:
-            label = "POSSIBLE_EXISTENCE"
+        if ent._.is_uncertain:
+            label = "possible"
+        elif ent._.is_negated:
+            label = "absent"
         # currently we cannot handle conditional
         # elif ent._.is_conditional:
         #     label = "conditional"
         elif ent._.is_hypothetical:
-            label = "HYPOTHETICAL"
+            label = "hypothetical"
         # i2b2 does not have historical labels
         # elif ent._.is_historical:
         #     label = "historical"
         elif ent._.is_family:
-            label = "FAMILY"
+            label = "family"
 
     return label
+
 
 
 def parse_value_from_sentence(sentence_text, label, matched_pattern):
@@ -480,7 +490,7 @@ def calculate_precision_recall_f1(true_positives, false_positives, false_negativ
     return precision, recall, f1
 
 
-def evaluate(doc_results_list, cervical_labels, out_name="cardio_eval"):
+def evaluate_v1(doc_results_list, cervical_labels, out_name="cardio_eval"):
     prediction_list = [(doc["data"]["note_id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr) for doc
                        in
                        doc_results_list for
@@ -600,6 +610,230 @@ def evaluate(doc_results_list, cervical_labels, out_name="cardio_eval"):
     return result_df
 
 
+# Function to find matches according to the new criteria
+def classify_matches(labels_df, predictions_df):
+    labels_df = labels_df.copy()
+    predictions_df = predictions_df.copy()
+    tp, fp, fn = 0, 0, 0
+    classification_report = []
+    # Check each prediction
+    for _, pred_row in predictions_df.iterrows():
+        match_found = False
+        for index, true_row in labels_df.iterrows():
+            if (pred_row['file_id'] == true_row['file_id'] and
+                    pred_row['label_pred'] == true_row['label_gold'] and
+                    do_intersect(pred_row['start'], pred_row['end'], true_row['start'], true_row['end'])):
+                match_found = True
+                labels_df.drop(index, inplace=True)  # Remove to avoid double counting
+                tp += 1
+                classification_report.append(
+                    {'file_id': pred_row['file_id'],
+                     'label': pred_row['label_pred'],
+                     "classification": "true_positive",
+                     "pred_start": pred_row['start'],
+                     "pred_end": pred_row['end'],
+                     "gold_start": true_row['start'],
+                     "gold_end": true_row['end'],
+                     "pred_text": pred_row['text_pred'],
+                     "gold_text": true_row['text_gold']})
+                break
+        if not match_found:
+            fp += 1
+            classification_report.append({
+                'file_id': pred_row['file_id'],
+                'label': pred_row['label_pred'],
+                "classification": "false_positive",
+                "pred_start": pred_row['start'],
+                "pred_end": pred_row['end'],
+                "pred_text": pred_row['text_pred']
+            })
+    # Remaining entries are false negatives
+    fn = len(labels_df)
+    for _, fn_row in labels_df.iterrows():
+        classification_report.append({
+            'file_id': fn_row['file_id'],
+            'label': fn_row['label_gold'],
+            "classification": "false_negative",
+            "gold_start": fn_row['start'],
+            "gold_end": fn_row['end'],
+            "gold_text": fn_row['text_gold']
+        })
+
+    return tp, fp, fn, classification_report
+
+# Function to determine if two spans intersect
+def do_intersect(start1, end1, start2, end2):
+    return max(start1, start2) <= min(end1, end2)
+
+
+def evaluate(doc_results_list, cervical_labels, eval_set="test"):
+    prediction_list = [(doc["id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr) for doc in
+                       doc_results_list for
+                       prediction in doc["predictions"] for r in prediction["result"] for rr in r["value"]["labels"]]
+    gold_labels = [(l["data"]["note_id"], rr["value"]["start"], rr["value"]["end"], rr["value"]["text"], rrr) for l in
+                   cervical_labels for r
+                   in l["annotations"] for rr in r["result"] for rrr in rr["value"]["labels"]]
+
+    # filter assertion labels
+    assertion_labels = ["present", "absent",
+                        "possible", "conditional",
+                        "hypothetical", "associated_with_someone_else",
+                        "historical", "family"]
+    context_to_i2b2_label_map = {
+        "NEGATED_EXISTENCE": "absent",
+        'POSSIBLE_EXISTENCE': "possible",
+        "CONDITIONAL_EXISTENCE": "conditional",
+        "HYPOTHETICAL": "hypothetical",
+        'HISTORICAL': "historical",
+        'FAMILY': "family"
+    }
+
+    assertion_labels += list(context_to_i2b2_label_map.keys())
+
+    # prediction_list = sorted(prediction_list)
+    # gold_labels = sorted(gold_labels)
+
+    predictions_df = pd.DataFrame(prediction_list, columns=["file_id", "start", "end", "text", "label"])
+    labels_df = pd.DataFrame(gold_labels, columns=["file_id", "start", "end", "text", "label"])
+
+    labels_df = labels_df[~labels_df["label"].isin(assertion_labels)]
+    predictions_df = predictions_df[~predictions_df["label"].isin(assertion_labels)]
+
+    # rename label column to label_gold
+    labels_df = labels_df.rename(columns={"label": "label_gold", "text": "text_gold"})
+    # rename label column to label_pred
+    predictions_df = predictions_df.rename(columns={"label": "label_pred", "text": "text_pred"})
+
+    # merged_df = pd.merge(labels_df, predictions_df, how="outer", on=["file_id", "start", "end"])
+    # remove nan from the set
+    labels_set = set(labels_df["label_gold"].tolist() + predictions_df["label_pred"].tolist())
+    labels_set = {label for label in labels_set if label == label}
+    labels_set = sorted(labels_set)
+
+    tp, fp, fn, classification_report = classify_matches(labels_df, predictions_df)
+
+    # merged_df["correct"] = merged_df["label_gold"] == merged_df["label_pred"]
+
+    classification_report_df = pd.DataFrame(classification_report)
+    classification_report_df.to_csv(f"artifacts/results/cervical_classification_report_{eval_set}.csv",
+                                    index=False,
+                                    quoting=csv.QUOTE_NONNUMERIC)
+    # merged_df.to_csv(f"artifacts/results/cervical_eval_detail_{eval_set}.csv", index=False,
+    #                  quoting=csv.QUOTE_NONNUMERIC)
+
+    # for i, row in merged_df.iterrows():
+    #     matching_rows = merged_df.loc[(merged_df["file_id"] == row["file_id"]) &
+    #                                   (merged_df["start"] == row["start"]) &
+    #                                   (merged_df["end"] == row["end"])]
+    #     if len(matching_rows) > 1:
+    #         print(f"Found {len(matching_rows)} matching rows")
+    #         print(matching_rows)
+    #         print(row)
+    #         print("\n\n")
+    #         merged_df = merged_df.drop(matching_rows.index[1:])
+
+    columns = ["label", "true_positives", "false_positives", "false_negatives",
+               "support", "precision", "recall", "f1"]
+
+    metrics_list = []
+
+    for label in labels_set:
+        # true_positives = np.count_nonzero(
+        #     np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] == label))
+        # false_positives = np.count_nonzero(
+        #     np.logical_and(merged_df["label_pred"] == label, merged_df["label_gold"] != label))
+        # false_negatives = np.count_nonzero(
+        #     np.logical_and(merged_df["label_pred"] != label, merged_df["label_gold"] == label))
+
+        true_positives = len(classification_report_df[(classification_report_df["label"] == label) &
+                                                      (classification_report_df["classification"] == "true_positive")])
+        false_positives = len(classification_report_df[(classification_report_df["label"] == label) &
+                                                       (classification_report_df[
+                                                            "classification"] == "false_positive")])
+        false_negatives = len(classification_report_df[(classification_report_df["label"] == label) &
+                                                       (classification_report_df[
+                                                            "classification"] == "false_negative")])
+
+        precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+
+        label_metric = {
+            "label": label,
+            "true_positives": true_positives,
+            "false_positives": false_positives,
+            "false_negatives": false_negatives,
+            "support": true_positives + false_negatives,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1
+        }
+        metrics_list.append(label_metric)
+
+    true_positives = sum([m["true_positives"] for m in metrics_list])
+    false_positives = sum([m["false_positives"] for m in metrics_list])
+    false_negatives = sum([m["false_negatives"] for m in metrics_list])
+    precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+
+    micro_dict = {
+        "label": "micro",
+        "true_positives": true_positives,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+        "support": true_positives + false_negatives,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+    # micro average
+    macro_dict = {
+        "label": "macro",
+        "precision": np.mean([m["precision"] for m in metrics_list]),
+        "recall": np.mean([m["recall"] for m in metrics_list]),
+        "f1": np.mean([m["f1"] for m in metrics_list])
+    }
+
+    # metrics_list.append(micro_dict)
+    # metrics_list.append(macro_dict)
+
+    result_df = pd.DataFrame(metrics_list, columns=columns)
+    micro_macro_df = pd.DataFrame([micro_dict, macro_dict], columns=columns)
+    result_df = result_df.round(3)
+    micro_macro_df = micro_macro_df.round(3)
+
+    result_df.to_csv(f"artifacts/results/cardio_eval_{eval_set}.csv")
+    result_df.to_latex(f"artifacts/results/cardio_eval_{eval_set}.tex")
+
+    micro_macro_df.to_csv(f"artifacts/results/cardio_micro_macro_{eval_set}.csv")
+    micro_macro_df.to_latex(f"artifacts/results/cardio_micro_macro_{eval_set}.tex")
+
+    return result_df
+
+
+def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
+    predicted_columns = [r.category for r in rule_set]
+
+    out_file_path = f"{out_dir}/cardio_notes_human_readable.csv"
+    out_file_with_pred_path = f"{out_dir}/cardio_notes_human_readable_with_pred.csv"
+
+    export_list = []
+
+    for doc in doc_results_list:
+        doc_row = doc["data"].copy()
+        doc_results = doc["predictions"][0]["result"]
+        for pred_column in predicted_columns:
+            matching_results = next(filter(lambda x: pred_column in x["value"]["labels"], doc_results), None)
+            if matching_results:
+                doc_row[pred_column] = "Yes"
+            else:
+                doc_row[pred_column] = "No"
+        export_list.append(doc_row)
+
+    export_df = pd.DataFrame(export_list)
+
+    export_df.to_csv(out_file_with_pred_path, index=False)
+    export_df.to_excel(out_file_with_pred_path.replace(".csv", ".xlsx"), index=False)
+
+
 def cardio_oncology_pipeline(notes_df):
     project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
     # remote dir shared
@@ -607,30 +841,45 @@ def cardio_oncology_pipeline(notes_df):
     out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
     out_dir = f"{current_datetime_str}"
 
-    annotated_data_path = "datasets/cardio-oncology/cardio-validation.json"
+    valid_file_path = "datasets/cardio-oncology/cardio-validation.json"
 
-    with open(annotated_data_path, "r") as f:
-        annotated_data = json.load(f)
+    with open(valid_file_path, "r") as f:
+        validation_labels = json.load(f)
+
+    context_to_i2b2_label_map = {
+        "NEGATED_EXISTENCE": "absent",
+        'POSSIBLE_EXISTENCE': "possible",
+        "CONDITIONAL_EXISTENCE": "conditional",
+        "HYPOTHETICAL": "hypothetical",
+        'HISTORICAL': "historical",
+        'FAMILY': "family"
+    }
+
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     rule_set = get_ruleset()
 
-    note_id_list = [note["data"]["note_id"] for note in annotated_data]
+    valid_note_ids = [note["data"]["note_id"] for note in validation_labels]
 
-    notes_df = notes_df[notes_df["note_id"].isin(note_id_list)]
+    valid_set = notes_df[notes_df["note_id"].isin(valid_note_ids)]
 
-    doc_results_list = run_medspacy(notes_df, rule_set, "NOTE_TEXT", out_dir)
+    valid_results = run_medspacy(valid_set, rule_set, "NOTE_TEXT", out_dir)
 
-    evaluate(doc_results_list, annotated_data)
+    evaluate_v1(valid_results, validation_labels)
 
-    report_results_label_count(doc_results_list, out_dir + "/label_count.csv")
+    valid_metrics = evaluate(valid_results, validation_labels, eval_set="valid")
 
-    sampled_results = sample_results(doc_results_list, 100)
+    report_results_label_count(valid_results, out_dir + "/label_count.csv")
+
+    sampled_results = sample_results(valid_results, 100)
 
     report_results_label_count(sampled_results, out_dir + "/sampled_label_count.csv")
     export_as_label_studio_format(sampled_results, out_dir)
+
+    export_as_human_readable_format(valid_results, rule_set, "artifacts/results/")
+
 
 
 def main():
