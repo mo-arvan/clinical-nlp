@@ -508,8 +508,39 @@ def evaluate(doc_results_list, cervical_labels, eval_set="test"):
 def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
     predicted_columns = [r.category for r in rule_set]
 
-    out_file_path = f"{out_dir}/cervical_notes_human_readable.csv"
-    out_file_with_pred_path = f"{out_dir}/cervical_notes_human_readable_with_pred.csv"
+    desired_columns = [
+        'Negative/Normal/NILM',
+        'Atypical Squamous Cells of undetermined Significance',
+        'Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)',
+        'Low-grade squamous intraepithelial lesion (LSIL)',
+        'High-grade squamous intraepithelial lesion (HSIL)',
+        'High-grade squamous intraepithelial lesion (HGSIL)',
+        'Squamous Cell Carcinoma',
+        'Atypical endocervical cells',
+        'Atypical endometrial cells',
+        'Atypical glandular cells',
+        'Atypical glandular cells (favor neoplastic)',
+        'Endocervical Adenocarcinoma in Situ (AIS)',
+        'Adenocarcinoma',
+        'Endocervical adenocarcinoma',
+        'Endometrial adenocarcinoma',
+        'Extrauterine adenocarcinoma',
+        'Adenocarcinoma NOS',
+        'HPV Negative',
+        'HPV Positive',
+        'HPV 16 Negative',
+        'HPV 16 Positive',
+        'HPV 18 Negative',
+        'HPV 18 Positive',
+        'HPV 18/45 Negative',
+        'HPV 18/45 positive',
+        'HPV Other Negative',
+        'HPV Other positive',
+
+    ]
+
+    out_full_path = f"{out_dir}/cervical_notes_report_full.xlsx"
+    out_subset_path = f"{out_dir}/cervical_notes_report_subset.xlsx"
 
     export_list = []
 
@@ -526,9 +557,12 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
 
     export_df = pd.DataFrame(export_list)
 
-    export_df.to_csv(out_file_with_pred_path, index=False)
-    export_df.to_excel(out_file_with_pred_path.replace(".csv", ".xlsx"), index=False)
+    # export_df.to_csv(out_file_with_pred_path, index=False)
+    export_df.to_excel(out_full_path, index=False)
 
+    subset_export_df = export_df[desired_columns]
+
+    subset_export_df.to_excel(out_subset_path, index=False)
 
 
 def main():
