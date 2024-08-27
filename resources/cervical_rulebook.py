@@ -11,16 +11,12 @@ cervical_rulebook_definition = [
 
     },
     {
-        #     transformation zone component not identified
         "category": "Transformation zone component not identified",
         "pattern": r"(Satisfactory for evaluation; )?transformation zone component not identified"
     },
     {
         "category": "Negative/Normal/NILM",
         "pattern": r"((Negative for intraepithelial lesion or malignancy)|(Negative for hyperplasia and malignancy)|(Negative for dysplasia and malignancy))"
-        # Negative for hyperplasia and malignancy
-        # Negative for dysplasia and malignancy
-
     },
     {
         "category": "Negative for Carcinoma",
@@ -33,21 +29,14 @@ cervical_rulebook_definition = [
     {
         "category": "Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)",
         "pattern": r"Atypical squamous cells,? cannot exclude( a)? high(-| )grade squamous intraepithelial lesion \(ASC-H\)"
-        #     Atypical squamous cells cannot exclude a high-grade squamous intraepithelial lesion (ASC-H)
-        # Atypical squamous cells, cannot exclude a high-grade squamous intraepithelial lesion (ASC-H)
     },
     {
         "category": "Low-grade squamous intraepithelial lesion (LSIL)",
         "pattern": r"Low(-| )grade squamous intraepithelial lesion( \(LSIL\))?"
-
-        #     low-grade squamous intraepithelial lesion (LSIL).
-        # low-grade squamous intraepithelial lesion
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HSIL)",
         "pattern": r"high(-| )grade squamous intraepithelial lesion( \(HSIL\))?(\. Cannot rule out squamous cell carcinoma)?"
-        #     high-grade squamous intraepithelial lesion (ASC-H)
-        #     high grade squamous intraepithelial lesion (HSIL)
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HGSIL)",
@@ -81,16 +70,9 @@ cervical_rulebook_definition = [
         "category": "Endocervical Adenocarcinoma in Situ (AIS)",
         "pattern": r"(Endocervical )?Adenocarcinoma in(-| )situ( \(AIS\))?(( of)? cervix)?"
     },
-    # {
-    #     "category": "AIS",
-    #     "pattern": r"((Adenocarcinoma in(-| )situ( \(AIS\))?)(( of)? cervix)?)"
-    #     #     Adenocarcinoma in-situ
-    #     #  Adenocarcinoma in-situ (AIS)
-    # },
-
     {
         "category": "Adenocarcinoma",
-        "literal": "Adenocarcinoma"
+        "pattern": r"((Adenocarcinoma)|(carcinoma, adenocarcinoma))"
     },
     {
         "category": "Endocervical adenocarcinoma",
@@ -151,8 +133,6 @@ cervical_rulebook_definition = [
     {
         "category": "HPV 18/45 Negative",
         "pattern": r"HPV 18/45\s+Negative"
-        #     OTHER HIGH RISK HPV TYPES *
-        #     (*INCLUDES TYPES 31, 33, 35, 39, 45, 51, 52, 56, 58, 59, 66, 68)
     },
     {
         "category": "HPV Positive",
@@ -181,20 +161,15 @@ cervical_rulebook_definition = [
     {
         "category": "CIN 1",
         "pattern": r"((mild dysplasia \(CIN I\))|(mild dysplasia)|(Low(-| )grade squamous (intra)?epithelial lesion)|CIN I)"
-        #     low grade squamous epithelial lesion
     },
     {
         "category": "CIN 2",
         "pattern":
             r"((moderate dysplasia \(CIN II\))|(moderate dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 2)|(high-grade squamous intraepithelial lesion)|(moderate grade dysplasia CIN II)|(HGSIL, high grade dysplasia CIN II))"
-        #     CIN II
-        # HGSIL, high grade dysplasia CIN II
-        # moderate grade dysplasia CIN II
     },
     {
         "category": "CIN3",
         "pattern": r"((severe dysplasia \(CIN III\))|(severe dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 3)|(high(-| )grade squamous intraepithelial lesion)|(CIN III \(cervical intraepithelial neoplasia grade III\) with severe dysplasia)|(HGSIL, high grade dysplasia CIN II))"
-        #     high grade squamous intraepithelial lesion
     },
     {
         "category": "CIN 2-3",
@@ -221,18 +196,9 @@ cervical_rulebook_definition = [
         "category": "Endometrial Cancer",
         "literal": "carcinoma, endometrial"
     },
-    {
-        "category": "Adenocarcinoma",
-        "literal": "carcinoma, adenocarcinoma"
-    },
+
     {
         "category": "Vaginal squamous intraepithelial neoplasia",
         "literal": "vaginal squamous intraepithelial neoplasia"
     },
-    # {
-    #     "category": "",
-    #     "literal": [
-    #         ""
-    #     ]
-    # },
 ]
