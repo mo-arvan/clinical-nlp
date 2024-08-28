@@ -1,0 +1,36 @@
+label,true_positives,false_positives,false_negatives,support,precision,recall,f1
+Adenocarcinoma,3.0,5.0,0.0,3.0,0.375,1.0,0.545
+Atypical Squamous Cells of undetermined Significance,50.0,3.0,0.0,50.0,0.943,1.0,0.971
+Atypical glandular cells,18.0,5.0,0.0,18.0,0.783,1.0,0.878
+Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H),11.0,0.0,9.0,20.0,1.0,0.55,0.71
+Bacterial Vaginosis,23.0,1.0,0.0,23.0,0.958,1.0,0.979
+Benign,4.0,31.0,0.0,4.0,0.114,1.0,0.205
+CIN 1,15.0,36.0,3.0,18.0,0.294,0.833,0.435
+CIN 2,0.0,3.0,4.0,4.0,0.0,0.0,0.0
+CIN 2-3,4.0,5.0,4.0,8.0,0.444,0.5,0.471
+CIN3,0.0,10.0,4.0,4.0,0.0,0.0,0.0
+Cancer NOS,0.0,0.0,1.0,1.0,0.0,0.0,0.0
+Candida,29.0,0.0,0.0,29.0,1.0,1.0,1.0
+Endocervical Adenocarcinoma in Situ (AIS),1.0,14.0,0.0,1.0,0.067,1.0,0.125
+Endometrial Cancer,0.0,2.0,1.0,1.0,0.0,0.0,0.0
+HPV 16 Negative,101.0,1.0,1.0,102.0,0.99,0.99,0.99
+HPV 16 Positive,20.0,0.0,0.0,20.0,1.0,1.0,1.0
+HPV 18 Negative,112.0,0.0,1.0,113.0,1.0,0.991,0.996
+HPV 18 Positive,10.0,0.0,0.0,10.0,1.0,1.0,1.0
+HPV Negative,44.0,0.0,8.0,52.0,1.0,0.846,0.917
+HPV Other Negative,68.0,0.0,2.0,70.0,1.0,0.971,0.986
+HPV Other positive,53.0,1.0,0.0,53.0,0.981,1.0,0.991
+HPV Positive,74.0,0.0,5.0,79.0,1.0,0.937,0.967
+Herpes Simplex Virus,0.0,1.0,0.0,0.0,0.0,0.0,0.0
+High-grade squamous intraepithelial lesion (HGSIL),0.0,1.0,3.0,3.0,0.0,0.0,0.0
+High-grade squamous intraepithelial lesion (HSIL),13.0,9.0,5.0,18.0,0.591,0.722,0.65
+Low-grade squamous intraepithelial lesion (LSIL),33.0,4.0,6.0,39.0,0.892,0.846,0.868
+Negative for Carcinoma,3.0,0.0,0.0,3.0,1.0,1.0,1.0
+Negative/Normal/NILM,78.0,2.0,9.0,87.0,0.975,0.897,0.934
+Satisfactory for evaluation,150.0,2.0,22.0,172.0,0.987,0.872,0.926
+Squamous Cell Cancer,1.0,0.0,0.0,1.0,1.0,1.0,1.0
+Transformation zone component not identified,12.0,18.0,2.0,14.0,0.4,0.857,0.545
+Trichomonas Vaginalis,11.0,0.0,2.0,13.0,1.0,0.846,0.917
+Unsatisfactory for evaluation,10.0,0.0,4.0,14.0,1.0,0.714,0.833
+micro,951.0,154.0,96.0,1047.0,0.861,0.908,0.884
+macro,,,,,0.66,0.739,0.662

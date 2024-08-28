@@ -3,16 +3,15 @@ import dataclasses
 cervical_rulebook_definition = [
     {
         "category": "Satisfactory for evaluation",
-        "pattern": "Satisfactory for evaluation(; transformation zone component present)?"
+        "pattern": r"((\bSatisfactory for evaluation(; transformation zone component present)?))"
     },
     {
         "category": "Unsatisfactory for evaluation",
-        "literal": "Unsatisfactory for evaluation"
-
+        "pattern": r"((Unsatisfactory for evaluation))"
     },
     {
         "category": "Transformation zone component not identified",
-        "pattern": r"(Satisfactory for evaluation; )?transformation zone component not identified"
+        "pattern": r"(((\bSatisfactory for evaluation; )?transformation zone component not identified)|(component cannot be assessed because of severe atrophy))"
     },
     {
         "category": "Negative/Normal/NILM",
@@ -40,7 +39,7 @@ cervical_rulebook_definition = [
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HGSIL)",
-        "pattern": r"high(-| )grade squamous intraepithelial lesion \(HGSIL\)"
+        "pattern": r"((high(-| )grade squamous intraepithelial lesion \(HGSIL\))|(ASCUS, cannot exclude HGSIL))"
     },
     {
         "category": "Squamous Cell Carcinoma",
@@ -56,7 +55,7 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Atypical glandular cells",
-        "literal": "Atypical glandular cells"
+        "pattern": r"((Atypical glandular cells( \(AGC\))?)|(AGC))"
     },
     {
         "category": "Atypical endocervical cells (Favors neoplastic)",
@@ -92,11 +91,11 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Trichomonas Vaginalis",
-        "literal": "Organisms consistent with Trichomonas vaginalis"
+        "pattern": r"((Organisms consistent with Trichomonas vaginalis)|(Trichomonas vaginalis))"
     },
     {
         "category": "Candida",
-        "literal": "Fungal organisms morphologically consistent with Candida spp."
+        "pattern": r"((Fungal organisms morphologically consistent with Candida spp.)|(Candida (species|spp.)))"
     },
     {
         "category": "Bacterial Vaginosis",
@@ -159,6 +158,10 @@ cervical_rulebook_definition = [
         "literal": "benign"
     },
     {
+        "category": "CIN 2-3",
+        "pattern": r"(CIN II(-|/)III)"
+    },
+    {
         "category": "CIN 1",
         "pattern": r"((mild dysplasia \(CIN I\))|(mild dysplasia)|(Low(-| )grade squamous (intra)?epithelial lesion)|CIN I)"
     },
@@ -172,17 +175,13 @@ cervical_rulebook_definition = [
         "pattern": r"((severe dysplasia \(CIN III\))|(severe dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 3)|(high(-| )grade squamous intraepithelial lesion)|(CIN III \(cervical intraepithelial neoplasia grade III\) with severe dysplasia)|(HGSIL, high grade dysplasia CIN II))"
     },
     {
-        "category": "CIN 2-3",
-        "pattern": r"(CIN II(-|/)III)"
-    },
-    {
         "category": "Histologic HSIL (unspecified)",
         "pattern": r"((high(-| )grade squamous intraepithelial lesion)|(cannot rule out cancer))"
     },
 
     {
         "category": "Cancer NOS",
-        "literal": "carcinoma, not otherwise specified"
+        "pattern": r"((carcinoma, not otherwise specified))"
     },
     {
         "category": "Small Cell Cancer",
@@ -190,7 +189,7 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Squamous Cell Cancer",
-        "literal": "carcinoma, squamous cell"
+        "pattern": r"((carcinoma, squamous cell)|((Fragments of )?squamous carcinoma))"
     },
     {
         "category": "Endometrial Cancer",

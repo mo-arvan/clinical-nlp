@@ -1,3 +1,4 @@
+import argparse
 import csv
 import functools
 import hashlib
@@ -20,19 +21,24 @@ logger = logging.getLogger(__name__)
 logger.info(f"Running {__file__}")
 
 
-def get_cervical_rulebook():
-    rule_set = [TargetRule(literal=rule.get("literal", ""),
-                           category=rule.get("category", ""),
-                           pattern=rule.get("pattern", None))
-                for rule in cervical_rulebook.cervical_rulebook_definition]
+def load_cervical_rulebook():
+    rule_set = []
+    for rule in cervical_rulebook.cervical_rulebook_definition:
+        if "pattern" in rule:
+            rule_set.append(TargetRule(literal=None, category=rule["category"], pattern=rule["pattern"]))
+        elif "literal" in rule:
+            rule_set.append(TargetRule(literal=rule["literal"], category=rule["category"], pattern=None))
+        else:
+            logger.error(f"Invalid rule {rule}")
 
+    # rule_set = [rule_set[1]]
     return rule_set
 
 
-def read_cervical_data():
+def load_cervical_data():
     data_path = "datasets/cervical/data_with_phi/holt_2023_00185_pap_hpv_deid.csv"
     cervical_validation_set = "datasets/cervical/cervical-validation.json"
-    test_set_labels = "datasets/cervical/cervical-test.json"
+    test_set_labels = "datasets/cervical/cervical-test-1-20240827.json"
     notes_column = "PROC_NARRATIVE_CLEAN"  # "Proc narrative"
 
     notes_df = pd.read_csv(data_path)
@@ -76,7 +82,7 @@ def read_cervical_data():
                 "notes": valid_df,
                 "labels": valid_labels_df
             },
-        "test":
+        "test-1":
             {
                 "notes": test_df,
                 "labels": test_labels_df
@@ -184,8 +190,14 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     return results_dict
 
 
-def run_medspacy(notes_df, rule_set, notes_column):
-    nlp = medspacy.load(medspacy_enable=["medspacy_pyrush", "medspacy_target_matcher", "medspacy_context"])
+def run_prediction_pipeline(notes_df, rule_set, notes_column):
+    nlp = medspacy.load(
+        # medspacy_enable=[
+        # "medspacy_pyrush",
+        # "medspacy_target_matcher",
+        # "medspacy_context"
+    # ]
+    )
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
     for rule in rule_set:
@@ -194,6 +206,7 @@ def run_medspacy(notes_df, rule_set, notes_column):
         except Exception as e:
             print(f"Failed to add rule {rule}")
             print(e)
+    # target_matcher._TargetMatcher__matcher._prune = False
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
@@ -424,7 +437,7 @@ def classify_matches(labels_df, predictions_df):
     return tp, fp, fn, classification_report
 
 
-def evaluate_and_report(doc_results_list, labels_df, eval_set="test"):
+def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1"):
     prediction_list = [(doc["id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr)
                        for doc in doc_results_list for
                        prediction in doc["predictions"]
@@ -515,19 +528,21 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test"):
         "f1": np.mean([m["f1"] for m in metrics_list])
     }
 
-    result_df = pd.DataFrame(metrics_list, columns=columns)
-    micro_macro_df = pd.DataFrame([micro_dict, macro_dict], columns=columns)
+    results_per_label_df = pd.DataFrame(metrics_list, columns=columns)
+    results_macro_micro_df = pd.DataFrame([micro_dict, macro_dict], columns=columns)
 
-    result_df = result_df.round(3)
-    micro_macro_df = micro_macro_df.round(3)
+    results_per_label_df = results_per_label_df.round(3)
+    results_macro_micro_df = results_macro_micro_df.round(3)
 
-    result_df.to_csv(f"artifacts/results/cervical_eval_{eval_set}.csv")
-    result_df.to_latex(f"artifacts/results/cervical_eval_{eval_set}.tex")
+    results_per_label_df.to_csv(f"artifacts/results/cervical_eval_{eval_set}.csv")
+    results_per_label_df.to_latex(f"artifacts/results/cervical_eval_{eval_set}.tex")
 
-    micro_macro_df.to_csv(f"artifacts/results/cervical_micro_macro_{eval_set}.csv")
-    micro_macro_df.to_latex(f"artifacts/results/cervical_micro_macro_{eval_set}.tex")
+    results_macro_micro_df.to_csv(f"artifacts/results/cervical_micro_macro_{eval_set}.csv")
+    results_macro_micro_df.to_latex(f"artifacts/results/cervical_micro_macro_{eval_set}.tex")
 
-    return result_df
+    results_df = pd.concat([results_per_label_df, results_macro_micro_df], ignore_index=True)
+
+    return results_df
 
 
 def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
@@ -590,24 +605,77 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
     subset_export_df.to_excel(out_subset_path, index=False)
 
 
+def record_performance_metrics(results_df, set_name):
+    results_df.to_parquet(f"monitoring/{set_name}_results.parquet")
+    results_df.to_csv(f"monitoring/{set_name}_results.csv", index=False)
+
+
+def monitor_performance(results_df, set_name, rtol=0.01, atol=0.01):
+    # compare the result with the baseline, if the difference is greater than the tolerance, but less than twice
+    # the tolerance, then we log a warning, if it is greater than twice the tolerance, we log an error
+    baseline_results_df = pd.read_parquet(f"monitoring/{set_name}_results.parquet")
+
+    logger.info(f"\n----\nMonitoring {set_name} performance")
+
+    for _, row in results_df.iterrows():
+        matching_baseline = baseline_results_df[(baseline_results_df["label"] == row["label"])]
+
+        if len(matching_baseline) != 1:
+            logger.error(f"Unexpected number of matches for {row['label']}, len:{len(matching_baseline)}")
+            continue
+        matching_baseline_row = matching_baseline.iloc[0]
+
+        if row["f1"] != matching_baseline_row["f1"]:
+            pass
+
+        # we compare the f1 score
+        if not np.allclose(row["f1"], matching_baseline_row["f1"], rtol=rtol, atol=atol):
+            if np.allclose(row["f1"], matching_baseline_row["f1"], rtol=2 * rtol, atol=2 * atol):
+                logger.error(
+                    f"Error: {row['label']} f1 score changed from {matching_baseline_row['f1']} to {row['f1']}")
+            else:
+                logger.warning(
+                    f"Warning: {row['label']} f1 score changed from {matching_baseline_row['f1']} to {row['f1']}")
+
+    logger.info(f"Monitoring {set_name} performance done\n\n")
+
+
 def main():
+    arg_parser = argparse.ArgumentParser()
+
+    arg_parser.add_argument("--record-performance", action="store_true", help="Record performance",
+                            default=False)
+
+    args = arg_parser.parse_args()
+
+    record_performance = args.record_performance
+
     start_timer = time.perf_counter()
-    dataset_dict, notes_column = read_cervical_data()
-    rule_set = get_cervical_rulebook()
+    dataset_dict, notes_column = load_cervical_data()
+    rule_set = load_cervical_rulebook()
 
     logger.info("Read file in {:.2f} seconds".format(time.perf_counter() - start_timer))
     start_timer = time.perf_counter()
 
-    valid_results = run_medspacy(dataset_dict["valid"]["notes"], rule_set, notes_column)
+    valid_results = run_prediction_pipeline(dataset_dict["valid"]["notes"], rule_set, notes_column)
 
     logger.info("Ran medspacy on valid in {:.2f} seconds".format(time.perf_counter() - start_timer))
 
-    test_results = run_medspacy(dataset_dict["test"]["notes"], rule_set, notes_column)
+    test_results = run_prediction_pipeline(dataset_dict["test-1"]["notes"], rule_set, notes_column)
 
     logger.info("Ran medspacy on test in {:.2f} seconds".format(time.perf_counter() - start_timer))
 
-    valid_metrics = evaluate_and_report(valid_results, dataset_dict["valid"]["labels"], eval_set="valid")
-    test_metrics = evaluate_and_report(test_results, dataset_dict["test"]["labels"], eval_set="test")
+    valid_results_df = evaluate_and_report(valid_results, dataset_dict["valid"]["labels"],
+                                           eval_set="valid")
+    test_results_df = evaluate_and_report(test_results, dataset_dict["test-1"]["labels"],
+                                          eval_set="test-1")
+
+    if record_performance:
+        record_performance_metrics(valid_results_df, "valid")
+        record_performance_metrics(test_results_df, "test-1")
+
+    monitor_performance(valid_results_df, "valid")
+    monitor_performance(test_results_df, "test-1")
 
     # export_as_label_studio_format(selected_notes, "artifacts/results/", remove_predictions=True)
     export_as_human_readable_format(test_results, rule_set, "artifacts/results/")
