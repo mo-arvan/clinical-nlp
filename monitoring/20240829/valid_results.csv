@@ -1,0 +1,33 @@
+label,true_positives,false_positives,false_negatives,support,precision,recall,f1
+Atypical Squamous Cells of undetermined Significance,64.0,1.0,0.0,64.0,0.985,1.0,0.992
+Atypical endocervical cells,12.0,0.0,0.0,12.0,1.0,1.0,1.0
+Atypical glandular cells,23.0,8.0,0.0,23.0,0.742,1.0,0.852
+Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H),11.0,1.0,6.0,17.0,0.917,0.647,0.759
+Bacterial Vaginosis,21.0,0.0,0.0,21.0,1.0,1.0,1.0
+Benign,5.0,8.0,0.0,5.0,0.385,1.0,0.556
+CIN 1,7.0,1.0,0.0,7.0,0.875,1.0,0.933
+CIN 2,1.0,0.0,2.0,3.0,1.0,0.333,0.5
+CIN 2-3,2.0,4.0,0.0,2.0,0.333,1.0,0.5
+CIN3,2.0,1.0,6.0,8.0,0.667,0.25,0.364
+Candida,2.0,1.0,0.0,2.0,0.667,1.0,0.8
+Endocervical Adenocarcinoma in Situ (AIS),3.0,1.0,0.0,3.0,0.75,1.0,0.857
+Endocervical adenocarcinoma in situ,0.0,0.0,1.0,1.0,0.0,0.0,0.0
+Endometrial Cancer,0.0,2.0,0.0,0.0,0.0,0.0,0.0
+HPV 16 Negative,93.0,0.0,0.0,93.0,1.0,1.0,1.0
+HPV 16 Positive,5.0,0.0,0.0,5.0,1.0,1.0,1.0
+HPV 18 Negative,93.0,0.0,0.0,93.0,1.0,1.0,1.0
+HPV 18 Positive,5.0,0.0,0.0,5.0,1.0,1.0,1.0
+HPV Negative,60.0,0.0,0.0,60.0,1.0,1.0,1.0
+HPV Other Negative,65.0,0.0,0.0,65.0,1.0,1.0,1.0
+HPV Other positive,33.0,0.0,0.0,33.0,1.0,1.0,1.0
+HPV Positive,38.0,0.0,0.0,38.0,1.0,1.0,1.0
+High-grade squamous intraepithelial lesion (HSIL),11.0,6.0,1.0,12.0,0.647,0.917,0.759
+Low-grade squamous intraepithelial lesion (LSIL),47.0,5.0,0.0,47.0,0.904,1.0,0.949
+Negative for Carcinoma,2.0,0.0,0.0,2.0,1.0,1.0,1.0
+Negative/Normal/NILM,25.0,3.0,1.0,26.0,0.893,0.962,0.926
+Satisfactory for evaluation,150.0,6.0,0.0,150.0,0.962,1.0,0.98
+Transformation zone component not identified,3.0,2.0,0.0,3.0,0.6,1.0,0.75
+Trichomonas Vaginalis,7.0,0.0,0.0,7.0,1.0,1.0,1.0
+Unsatisfactory for evaluation,6.0,0.0,0.0,6.0,1.0,1.0,1.0
+micro,796.0,50.0,17.0,813.0,0.941,0.979,0.96
+macro,,,,,0.811,0.87,0.816

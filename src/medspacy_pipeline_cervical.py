@@ -10,24 +10,34 @@ import time
 import medspacy
 import numpy as np
 import pandas as pd
+import spacy
 from medspacy.ner import TargetRule
 
 import parallel_helper
 from resources import cervical_rulebook
+from src import target_matcher
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 logger.info(f"Running {__file__}")
 
+target_matcher.init()
 
 def load_cervical_rulebook():
     rule_set = []
     for rule in cervical_rulebook.cervical_rulebook_definition:
+        metadata = rule.get("metadata", None)
         if "pattern" in rule:
-            rule_set.append(TargetRule(literal=None, category=rule["category"], pattern=rule["pattern"]))
+            rule_set.append(TargetRule(literal=None,
+                                       category=rule["category"],
+                                       pattern=rule["pattern"],
+                                       metadata=metadata))
         elif "literal" in rule:
-            rule_set.append(TargetRule(literal=rule["literal"], category=rule["category"], pattern=None))
+            rule_set.append(TargetRule(literal=rule["literal"],
+                                       category=rule["category"],
+                                       pattern=None,
+                                       metadata=metadata))
         else:
             logger.error(f"Invalid rule {rule}")
 
@@ -47,7 +57,8 @@ def load_cervical_data():
 
     notes_df["note_id"] = range(len(notes_df))
     notes_df["note_hash"] = [hashlib.md5(note.encode()).hexdigest() for note in notes_df["PROC_NARRATIVE"]]
-    notes_df = notes_df[~duplicate_notes_condition]
+    # notes_df = notes_df[~duplicate_notes_condition]
+    notes_df = notes_df.drop_duplicates()
     notes_df.fillna(value="Not Available", inplace=True)
 
     notes_df["PROC_NARRATIVE_CLEAN"] = notes_df["PROC_NARRATIVE"].apply(lambda x: x.replace("\\n", "\n"))
@@ -60,7 +71,6 @@ def load_cervical_data():
 
     validation_set_ids = [note["data"]["note_id"] for note in validation_labels]
     test_set_ids = [note["data"]["note_id"] for note in test_set_labels]
-
     valid_df = notes_df[notes_df["note_id"].isin(validation_set_ids)]
     test_df = notes_df[notes_df["note_id"].isin(test_set_ids)]
     rest_df = notes_df[~notes_df["note_id"].isin(validation_set_ids + test_set_ids)]
@@ -71,6 +81,11 @@ def load_cervical_data():
                        cervical_labels for r
                        in l["annotations"] for rr in r["result"] for rrr in rr["value"]["labels"]]
         labels_df = pd.DataFrame(gold_labels, columns=["file_id", "start", "end", "text", "label"])
+        # duplicate_labels_condition = labels_df.duplicated(keep=False)
+        # duplicate_labels = labels_df[duplicate_labels_condition]
+        # duplicates_removed = duplicate_labels.drop_duplicates()
+        # labels_df = labels_df[~duplicate_labels_condition]
+        labels_df = labels_df.drop_duplicates()
         return labels_df
 
     valid_labels_df = get_labels_df(validation_labels)
@@ -98,6 +113,9 @@ def load_cervical_data():
 
 
 def get_medspacy_label(ent):
+    if not hasattr(ent._, "modifiers"):
+        return "present"
+
     context_to_i2b2_label_map = {
         "NEGATED_EXISTENCE": "absent",
         'POSSIBLE_EXISTENCE': "possible",
@@ -144,6 +162,7 @@ def get_medspacy_label(ent):
 
 def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     i, data_row = i_data_row
+
     doc = medspacy_nlp(data_row[note_text_column])
 
     # if i == 234:
@@ -190,13 +209,13 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     return results_dict
 
 
-def run_prediction_pipeline(notes_df, rule_set, notes_column):
+def run_medspacy_prediction_pipeline(notes_df, rule_set, notes_column):
     nlp = medspacy.load(
         # medspacy_enable=[
         # "medspacy_pyrush",
         # "medspacy_target_matcher",
         # "medspacy_context"
-    # ]
+        # ]
     )
 
     target_matcher = nlp.get_pipe("medspacy_target_matcher")
@@ -206,7 +225,29 @@ def run_prediction_pipeline(notes_df, rule_set, notes_column):
         except Exception as e:
             print(f"Failed to add rule {rule}")
             print(e)
-    # target_matcher._TargetMatcher__matcher._prune = False
+    target_matcher._TargetMatcher__matcher._prune = False
+
+    run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
+                                                     medspacy_nlp=nlp,
+                                                     note_text_column=notes_column)
+    doc_results_list = parallel_helper.run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
+                                                                 notes_df.iterrows(),
+                                                                 total=len(notes_df),
+                                                                 max_workers=16)
+
+    return doc_results_list
+
+
+def run_prediction_pipeline(notes_df, rule_set, notes_column):
+    # nlp = spacy.load("en_core_web_sm")
+    nlp = spacy.blank("en")
+
+    nlp.add_pipe("target_matcher")
+    target_matcher = nlp.get_pipe("target_matcher")
+    target_matcher.add(rule_set)
+
+    # debug_note_list = [6929]  # 349 6723, 6724
+    # notes_df = notes_df[notes_df["note_id"].isin(debug_note_list)]
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
@@ -387,51 +428,52 @@ def do_intersect(start1, end1, start2, end2):
 
 # Function to find matches according to the new criteria
 def classify_matches(labels_df, predictions_df):
-    labels_df = labels_df.copy()
-    predictions_df = predictions_df.copy()
+    labels_list = labels_df.to_dict('records')
+    predictions_list = predictions_df.to_dict('records')
     tp, fp, fn = 0, 0, 0
     classification_report = []
     # Check each prediction
-    for _, pred_row in predictions_df.iterrows():
+    for pred_dict in predictions_list:
         match_found = False
-        for index, true_row in labels_df.iterrows():
-            if (pred_row['file_id'] == true_row['file_id'] and
-                    pred_row['label_pred'] == true_row['label_gold'] and
-                    do_intersect(pred_row['start'], pred_row['end'], true_row['start'], true_row['end'])):
+        for index, true_row in enumerate(labels_list):
+            if (pred_dict['file_id'] == true_row['file_id'] and
+                    pred_dict['label_pred'] == true_row['label_gold'] and
+                    do_intersect(pred_dict['start'], pred_dict['end'], true_row['start'], true_row['end'])):
                 match_found = True
-                labels_df.drop(index, inplace=True)  # Remove to avoid double counting
+                labels_list[index]["matched"] = True
                 tp += 1
                 classification_report.append(
-                    {'file_id': pred_row['file_id'],
-                     'label': pred_row['label_pred'],
+                    {'file_id': pred_dict['file_id'],
+                     'label': pred_dict['label_pred'],
                      "classification": "true_positive",
-                     "pred_start": pred_row['start'],
-                     "pred_end": pred_row['end'],
+                     "pred_start": pred_dict['start'],
+                     "pred_end": pred_dict['end'],
                      "gold_start": true_row['start'],
                      "gold_end": true_row['end'],
-                     "pred_text": pred_row['text_pred'],
+                     "pred_text": pred_dict['text_pred'],
                      "gold_text": true_row['text_gold']})
                 break
         if not match_found:
             fp += 1
             classification_report.append({
-                'file_id': pred_row['file_id'],
-                'label': pred_row['label_pred'],
+                'file_id': pred_dict['file_id'],
+                'label': pred_dict['label_pred'],
                 "classification": "false_positive",
-                "pred_start": pred_row['start'],
-                "pred_end": pred_row['end'],
-                "pred_text": pred_row['text_pred']
+                "pred_start": pred_dict['start'],
+                "pred_end": pred_dict['end'],
+                "pred_text": pred_dict['text_pred']
             })
     # Remaining entries are false negatives
-    fn = len(labels_df)
-    for _, fn_row in labels_df.iterrows():
+    remaining_labels = [true_row for true_row in labels_list if "matched" not in true_row]
+    fn = len(remaining_labels)
+    for fn_dict in remaining_labels:
         classification_report.append({
-            'file_id': fn_row['file_id'],
-            'label': fn_row['label_gold'],
+            'file_id': fn_dict['file_id'],
+            'label': fn_dict['label_gold'],
             "classification": "false_negative",
-            "gold_start": fn_row['start'],
-            "gold_end": fn_row['end'],
-            "gold_text": fn_row['text_gold']
+            "gold_start": fn_dict['start'],
+            "gold_end": fn_dict['end'],
+            "gold_text": fn_dict['text_gold']
         })
 
     return tp, fp, fn, classification_report
@@ -605,15 +647,15 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
     subset_export_df.to_excel(out_subset_path, index=False)
 
 
-def record_performance_metrics(results_df, set_name):
-    results_df.to_parquet(f"monitoring/{set_name}_results.parquet")
-    results_df.to_csv(f"monitoring/{set_name}_results.csv", index=False)
+def record_performance_metrics(results_df, set_name, performance_baseline_dir):
+    results_df.to_parquet(f"{performance_baseline_dir}/{set_name}_results.parquet")
+    results_df.to_csv(f"{performance_baseline_dir}/{set_name}_results.csv", index=False)
 
 
-def monitor_performance(results_df, set_name, rtol=0.01, atol=0.01):
+def monitor_performance(results_df, set_name, performance_baseline_dir, rtol=0.01, atol=0.01):
     # compare the result with the baseline, if the difference is greater than the tolerance, but less than twice
     # the tolerance, then we log a warning, if it is greater than twice the tolerance, we log an error
-    baseline_results_df = pd.read_parquet(f"monitoring/{set_name}_results.parquet")
+    baseline_results_df = pd.read_parquet(f"{performance_baseline_dir}/{set_name}_results.parquet")
 
     logger.info(f"\n----\nMonitoring {set_name} performance")
 
@@ -645,10 +687,13 @@ def main():
 
     arg_parser.add_argument("--record-performance", action="store_true", help="Record performance",
                             default=False)
+    arg_parser.add_argument("--performance-baseline-dir", type=str, help="Performance baseline directory",
+                            default="monitoring/20240829")
 
     args = arg_parser.parse_args()
 
     record_performance = args.record_performance
+    performance_baseline_dir = args.performance_baseline_dir
 
     start_timer = time.perf_counter()
     dataset_dict, notes_column = load_cervical_data()
@@ -665,17 +710,19 @@ def main():
 
     logger.info("Ran medspacy on test in {:.2f} seconds".format(time.perf_counter() - start_timer))
 
-    valid_results_df = evaluate_and_report(valid_results, dataset_dict["valid"]["labels"],
+    valid_results_df = evaluate_and_report(valid_results,
+                                           dataset_dict["valid"]["labels"],
                                            eval_set="valid")
-    test_results_df = evaluate_and_report(test_results, dataset_dict["test-1"]["labels"],
+    test_results_df = evaluate_and_report(test_results,
+                                          dataset_dict["test-1"]["labels"],
                                           eval_set="test-1")
 
     if record_performance:
-        record_performance_metrics(valid_results_df, "valid")
-        record_performance_metrics(test_results_df, "test-1")
+        record_performance_metrics(valid_results_df, "valid", performance_baseline_dir)
+        record_performance_metrics(test_results_df, "test-1", performance_baseline_dir)
 
-    monitor_performance(valid_results_df, "valid")
-    monitor_performance(test_results_df, "test-1")
+    monitor_performance(valid_results_df, "valid", performance_baseline_dir)
+    monitor_performance(test_results_df, "test-1", performance_baseline_dir)
 
     # export_as_label_studio_format(selected_notes, "artifacts/results/", remove_predictions=True)
     export_as_human_readable_format(test_results, rule_set, "artifacts/results/")

@@ -1,21 +1,31 @@
-import dataclasses
-
 cervical_rulebook_definition = [
     {
         "category": "Satisfactory for evaluation",
-        "pattern": r"((\bSatisfactory for evaluation(; transformation zone component present)?))"
+        "pattern": r"((\bSatisfactory for evaluation(; transformation zone component present)?))",
+        "metadata": {
+            "group": "evaluation",
+            "priority": 1,
+        }
     },
     {
         "category": "Unsatisfactory for evaluation",
-        "pattern": r"((Unsatisfactory for evaluation))"
+        "pattern": r"((Unsatisfactory for evaluation))",
+        "metadata": {
+            "group": "evaluation",
+            "priority": 2,
+        }
     },
     {
         "category": "Transformation zone component not identified",
-        "pattern": r"(((\bSatisfactory for evaluation; )?transformation zone component not identified)|(component cannot be assessed because of severe atrophy))"
+        "pattern": r"(((\bSatisfactory for evaluation; )?transformation zone component not identified)|((\bSatisfactory for evaluation; )?endocervical/transformation component cannot\s+be assessed because of severe atrophy))",
+        "metadata": {
+            "group": "evaluation",
+            "priority": 3,
+        }
     },
     {
         "category": "Negative/Normal/NILM",
-        "pattern": r"((Negative for intraepithelial lesion or malignancy)|(Negative for hyperplasia and malignancy)|(Negative for dysplasia and malignancy))"
+        "pattern": r"((Negative for intraepithelial lesion or malignancy)|(Negative for hyperplasia and malignancy)|(Negative for (definitive evidence of )?(high grade )?dysplasia( and malignancy)?))"
     },
     {
         "category": "Negative for Carcinoma",
@@ -31,15 +41,15 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Low-grade squamous intraepithelial lesion (LSIL)",
-        "pattern": r"Low(-| )grade squamous intraepithelial lesion( \(LSIL\))?"
+        "pattern": r"((low(-| )(grade )?squamous intraepithelial lesion( \(LSIL\))?))"
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HSIL)",
-        "pattern": r"high(-| )grade squamous intraepithelial lesion( \(HSIL\))?(\. Cannot rule out squamous cell carcinoma)?"
+        "pattern": r"((high(-| )(grade )?squamous intraepithelial lesion( \(HSIL\))?(\. Cannot rule out squamous cell carcinoma)?))"
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HGSIL)",
-        "pattern": r"((high(-| )grade squamous intraepithelial lesion \(HGSIL\))|(ASCUS, cannot exclude HGSIL))"
+        "pattern": r"((high(-| )(grade )?squamous intraepithelial lesion( \(HGSIL\))?)|(ASCUS, cannot exclude HGSIL))"
     },
     {
         "category": "Squamous Cell Carcinoma",
@@ -159,20 +169,37 @@ cervical_rulebook_definition = [
     },
     {
         "category": "CIN 2-3",
-        "pattern": r"(CIN II(-|/)III)"
+        "pattern": r"(CIN (II|2)(-|/|, )(III|3))",
+        "metadata": {
+            "group": "CIN",
+            "priority": 4,
+        }
     },
     {
         "category": "CIN 1",
-        "pattern": r"((mild dysplasia \(CIN I\))|(mild dysplasia)|(Low(-| )grade squamous (intra)?epithelial lesion)|CIN I)"
+        "pattern": r"((mild dysplasia \(CIN I\))|(mild dysplasia)|(Low(-| )grade squamous (intra)?epithelial lesion)|(CIN (I|1)))",
+        "metadata": {
+            "group": "CIN",
+            "priority": 1,
+        }
+
     },
     {
         "category": "CIN 2",
         "pattern":
-            r"((moderate dysplasia \(CIN II\))|(moderate dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 2)|(high-grade squamous intraepithelial lesion)|(moderate grade dysplasia CIN II)|(HGSIL, high grade dysplasia CIN II))"
+            r"((moderate dysplasia \(CIN II\))|(moderate dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 2)|(high-grade squamous intraepithelial lesion)|(moderate grade dysplasia CIN II)|(HGSIL, high grade dysplasia CIN II)|(CIN (II|2)))",
+        "metadata": {
+            "group": "CIN",
+            "priority": 2,
+        }
     },
     {
         "category": "CIN3",
-        "pattern": r"((severe dysplasia \(CIN III\))|(severe dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 3)|(high(-| )grade squamous intraepithelial lesion)|(CIN III \(cervical intraepithelial neoplasia grade III\) with severe dysplasia)|(HGSIL, high grade dysplasia CIN II))"
+        "pattern": r"((severe dysplasia \(CIN III\))|(severe dysplasia)|(cervical intraepithelial neoplasia \(CIN\) 3)|(high(-| )grade squamous intraepithelial lesion)|(CIN III \(cervical intraepithelial neoplasia grade III\) with severe dysplasia)|(HGSIL, high grade dysplasia CIN II)|(CIN (III|3)))",
+        "metadata": {
+            "group": "CIN",
+            "priority": 3,
+        }
     },
     {
         "category": "Histologic HSIL (unspecified)",
@@ -193,7 +220,7 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Endometrial Cancer",
-        "literal": "carcinoma, endometrial"
+        "pattern": r"((carcinoma, endometrial)|(endometrioid carcinoma))"
     },
 
     {
