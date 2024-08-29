@@ -246,7 +246,7 @@ def run_prediction_pipeline(notes_df, rule_set, notes_column):
     target_matcher = nlp.get_pipe("target_matcher")
     target_matcher.add(rule_set)
 
-    # debug_note_list = [6929]  # 349 6723, 6724
+    # debug_note_list = [6475]  # 349 6723, 6724 6929
     # notes_df = notes_df[notes_df["note_id"].isin(debug_note_list)]
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,

@@ -37,19 +37,19 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)",
-        "pattern": r"Atypical squamous cells,? cannot exclude( a)? high(-| )grade squamous intraepithelial lesion \(ASC-H\)"
+        "pattern": r"((Atypical squamous cells,? cannot exclude( a)? high(-| )grade squamous intraepithelial lesion( \(ASC-H\))?)|(ASC-H))"
     },
     {
         "category": "Low-grade squamous intraepithelial lesion (LSIL)",
-        "pattern": r"((low(-| )(grade )?squamous intraepithelial lesion( \(LSIL\))?))"
+        "pattern": r"((low(-| )(grade\s+)?squamous (intra)?epithelial lesion( \(LSIL\))?)|(LG?SIL))"
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HSIL)",
-        "pattern": r"((high(-| )(grade )?squamous intraepithelial lesion( \(HSIL\))?(\. Cannot rule out squamous cell carcinoma)?))"
+        "pattern": r"((high(-| )(grade )?squamous (intra)?epithelial lesion( \(HSIL\))?(\. Cannot rule out squamous cell carcinoma)?)|(HG?SIL))"
     },
     {
         "category": "High-grade squamous intraepithelial lesion (HGSIL)",
-        "pattern": r"((high(-| )(grade )?squamous intraepithelial lesion( \(HGSIL\))?)|(ASCUS, cannot exclude HGSIL))"
+        "pattern": r"((high(-| )(grade )?squamous (intra)?epithelial lesion( \(HGSIL\))?)|(ASCUS, cannot exclude HGSIL))"
     },
     {
         "category": "Squamous Cell Carcinoma",
@@ -105,7 +105,7 @@ cervical_rulebook_definition = [
     },
     {
         "category": "Candida",
-        "pattern": r"((Fungal organisms morphologically consistent with Candida spp.)|(Candida (species|spp.)))"
+        "pattern": r"((Fungal organisms morphologically consistent with Candida spp.)|(Candida (species|spp(\.)?)))"
     },
     {
         "category": "Bacterial Vaginosis",
