@@ -1,6 +1,6 @@
 """
-# ! pip install -q numpy medspacy tqdm spacy
-# dbutils.library.restartPython()
+!pip install -q numpy medspacy tqdm spacy
+dbutils.library.restartPython()
 """
 
 import concurrent.futures
@@ -16,6 +16,7 @@ import medspacy
 import numpy as np
 import pandas as pd
 from medspacy.ner import TargetRule
+from nltk.tbl import rule
 from tqdm import tqdm
 
 CARDIO_RULEBOOK = [
@@ -169,12 +170,31 @@ CARDIO_RULEBOOK = [
     }
 ]
 
+CARDIO_EF_GLS_RULEBOOK = [
+    {
+        "category": "Ejection Fraction",
+        "pattern": r"(left ventricular |reduced )?ejection fraction|(LV|(?<= ))EF(?= )"
+    },
+    {
+        "category": "Global Longitudinal Strain",
+        "pattern": r"subclinical LV dysfunction|global longitudinal strain|GLS"
+    },
+]
+
 
 def get_ruleset():
     rule_set = [TargetRule(literal=rule.get("literal", ""),
                            category=rule.get("category", ""),
                            pattern=rule.get("pattern", None))
                 for rule in CARDIO_RULEBOOK]
+
+    return rule_set
+
+def get_ef_gls_ruleset():
+    rule_set = [TargetRule(literal=rule.get("literal", ""),
+                           category=rule.get("category", ""),
+                           pattern=rule.get("pattern", None))
+                for rule in CARDIO_EF_GLS_RULEBOOK]
 
     return rule_set
 
@@ -251,28 +271,11 @@ def get_medspacy_label(ent):
 
 
 
-def parse_value_from_sentence(sentence_text, label, matched_pattern):
-    value = None
-    if label in ["Global Longitudinal Strain",
-                 "EF 51%-54%", ]:
-
-        pattern_index_in_sentence = sentence_text.find(matched_pattern)
-        sentence_starting_with_matched_pattern = sentence_text[pattern_index_in_sentence:]
-        for pattern in value_patterns:
-            match = pattern.search(sentence_starting_with_matched_pattern)
-            if match:
-                value = match.group(1)
-                break
-    return value
-
 
 def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
     i, data_row = i_data_row
     row_dict = data_row.to_dict()
-    note_id = data_row["note_id"]
-    #
-    if note_id == 2:
-        pass
+    note_hash = data_row["note_hash"]
 
     doc = medspacy_nlp(data_row[note_text_column])
 
@@ -282,15 +285,17 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
     for ent in doc.ents:
         text = ent.text
         label = ent.label_
-        assertion = get_medspacy_label(ent)
-        prediction_id = f"note_{note_id}_ent_{ent.start}_{ent.end}"
+        # assertion = get_medspacy_label(ent)
+        prediction_id = f"note_{note_hash}_ent_{ent.start}_{ent.end}"
 
         prediction_dict = {
             "value": {
                 "start": ent.start_char,
                 "end": ent.end_char,
                 "text": text,
-                "labels": [label, assertion],
+                "labels": [label
+                    # , assertion
+                           ],
             },
             "id": prediction_id,
             "from_name": "label",
@@ -301,14 +306,14 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
         prediction_list.append(prediction_dict)
 
         if label in ["Global Longitudinal Strain",
-                     "EF 51%-54%", ]:
+                     "Ejection Fraction", ]:
             match = value_pattern.search(doc.text[ent.start_char:len(doc.text)])
             if match:
                 value = match[0]
                 value_start = ent.start_char + match.start()
                 value_end = ent.start_char + match.end()
                 value_label = "GLS Value" if label == "Global Longitudinal Strain" else "EF Value"
-                prediction_id = f"note_{note_id}_ent_{value_start}_{value_end}"
+                prediction_id = f"note_{note_hash}_ent_{value_start}_{value_end}"
                 prediction_dict = {
                     "value": {
                         "start": value_start,
@@ -324,10 +329,10 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
                 }
                 prediction_list.append(prediction_dict)
             # else:
-            #     print(f"Value not found for {label} in note {note_id}, text: {doc.text[ent.start_char:]}")
+            #     print(f"Value not found for {label} in note {note_hash}, text: {doc.text[ent.start_char:]}")
 
     results_dict = {
-        "id": note_id,
+        "note_hash": note_hash,
         "data": {
             "num_predictions": len(prediction_list),
             **row_dict
@@ -340,6 +345,18 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
     }
 
     return results_dict
+
+def get_ids_of_interest(spark):
+    ids_table_name = "`hive_metastore`.`cardio_oncology`.`ids_of_interest`"
+
+    query = f"SELECT * FROM {ids_table_name}"
+    ids_spark = spark.sql(query)
+
+    ids_df = ids_spark.toPandas()
+
+    ids_list = ids_df["EpicPatientID"].unique().tolist()
+
+    return ids_list
 
 
 def get_notes_df(spark):
@@ -357,17 +374,6 @@ def get_notes_df(spark):
     return notes_df
 
 
-def get_ids_of_interest(spark):
-    ids_table_name = "`hive_metastore`.`cardio_oncology`.`ids_of_interest`"
-
-    query = f"SELECT * FROM {ids_table_name}"
-    ids_spark = spark.sql(query)
-
-    ids_df = ids_spark.toPandas()
-
-    ids_list = ids_df["EpicPatientID"].unique().tolist()
-
-    return ids_list
 
 
 def sample_results(doc_results_list, k):
@@ -831,20 +837,20 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
     export_df = pd.DataFrame(export_list)
 
     export_df.to_csv(out_file_with_pred_path, index=False)
-    export_df.to_excel(out_file_with_pred_path.replace(".csv", ".xlsx"), index=False)
+    # export_df.to_excel(out_file_with_pred_path.replace(".csv", ".xlsx"), index=False)
 
 
 def cardio_oncology_pipeline(notes_df):
-    project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org/"
+    project_dir = "/Workspace/Users/vamarvan23@osfhealthcare.org"
     # remote dir shared
     current_datetime_str = datetime.datetime.now().strftime("%Y%m%d")
-    out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
-    out_dir = f"{current_datetime_str}"
+    # out_dir = f"/Workspace/Shared/NLP/{current_datetime_str}"
+    out_dir = f"{project_dir}/{current_datetime_str}"
 
-    valid_file_path = "datasets/cardio-oncology/cardio-validation.json"
-
-    with open(valid_file_path, "r") as f:
-        validation_labels = json.load(f)
+    # valid_file_path = "datasets/cardio-oncology/cardio-validation.json"
+    #
+    # with open(valid_file_path, "r") as f:
+    #     validation_labels = json.load(f)
 
     context_to_i2b2_label_map = {
         "NEGATED_EXISTENCE": "absent",
@@ -859,33 +865,30 @@ def cardio_oncology_pipeline(notes_df):
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    rule_set = get_ruleset()
+    rule_set = get_ef_gls_ruleset()
 
-    valid_note_ids = [note["data"]["note_id"] for note in validation_labels]
+    notes_results = run_medspacy(notes_df, rule_set, "NOTE_TEXT", out_dir)
 
-    valid_set = notes_df[notes_df["note_id"].isin(valid_note_ids)]
 
-    valid_results = run_medspacy(valid_set, rule_set, "NOTE_TEXT", out_dir)
+    # valid_note_ids = [note["data"]["note_id"] for note in validation_labels]
 
-    evaluate_v1(valid_results, validation_labels)
+    # valid_set = notes_df[notes_df["note_id"].isin(valid_note_ids)]
 
-    valid_metrics = evaluate(valid_results, validation_labels, eval_set="valid")
 
-    report_results_label_count(valid_results, out_dir + "/label_count.csv")
-
-    sampled_results = sample_results(valid_results, 100)
-
-    report_results_label_count(sampled_results, out_dir + "/sampled_label_count.csv")
-    export_as_label_studio_format(sampled_results, out_dir)
-
-    export_as_human_readable_format(valid_results, rule_set, "artifacts/results/")
+    # evaluate_v1(valid_results, validation_labels)
+    # valid_metrics = evaluate(valid_results, validation_labels, eval_set="valid")
+    # report_results_label_count(valid_results, out_dir + "/label_count.csv")
+    # sampled_results = sample_results(valid_results, 100)
+    # report_results_label_count(sampled_results, out_dir + "/sampled_label_count.csv")
+    export_as_label_studio_format(notes_results, out_dir)
+    export_as_human_readable_format(notes_results, rule_set, out_dir)
 
 
 
 def main():
+    notes_df = pd.read_parquet("notes_df.parquet")
     # notes_df = get_notes_df(spark)
 
-    notes_df = pd.read_parquet("notes_df.parquet")
     # notes_df = notes_df.sample(1000)
     cardio_oncology_pipeline(notes_df)
 
