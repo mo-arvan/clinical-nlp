@@ -190,6 +190,7 @@ def get_ruleset():
 
     return rule_set
 
+
 def get_ef_gls_ruleset():
     rule_set = [TargetRule(literal=rule.get("literal", ""),
                            category=rule.get("category", ""),
@@ -270,9 +271,7 @@ def get_medspacy_label(ent):
     return label
 
 
-
-
-def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
+def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
     i, data_row = i_data_row
     row_dict = data_row.to_dict()
     note_hash = data_row["note_hash"]
@@ -294,7 +293,7 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
                 "end": ent.end_char,
                 "text": text,
                 "labels": [label
-                    # , assertion
+                           # , assertion
                            ],
             },
             "id": prediction_id,
@@ -346,6 +345,7 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column, out_dir):
 
     return results_dict
 
+
 def get_ids_of_interest(spark):
     ids_table_name = "`hive_metastore`.`cardio_oncology`.`ids_of_interest`"
 
@@ -372,8 +372,6 @@ def get_notes_df(spark):
     notes_df = notes_spark.toPandas()
 
     return notes_df
-
-
 
 
 def sample_results(doc_results_list, k):
@@ -433,14 +431,14 @@ def report_results_label_count(doc_results_list, file_name):
     label_count_df.to_csv(f"{file_name}", index=False)
 
 
-def export_as_label_studio_format(doc_results_list, out_dir):
-    out_file_path = f"{out_dir}/cardio_notes.json"
+def export_as_label_studio_format(doc_results_list, out_dir, file_name="cardio_notes"):
+    out_file_path = f"{out_dir}/{file_name}.json"
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
     with open(out_file_path, "w") as f:
         json.dump(results_list, f, indent=2)
 
 
-def run_medspacy(notes_df, rule_set, notes_column, out_dir):
+def run_medspacy(notes_df, rule_set, notes_column, filter_empty):
     nlp = medspacy.load(medspacy_enable=[
         "medspacy_pyrush",
         "medspacy_target_matcher",
@@ -468,13 +466,14 @@ def run_medspacy(notes_df, rule_set, notes_column, out_dir):
 
     run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
                                                      medspacy_nlp=nlp,
-                                                     note_text_column=notes_column,
-                                                     out_dir=out_dir)
+                                                     note_text_column=notes_column)
     doc_results_list = run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
                                                  notes_df.iterrows(),
                                                  total=len(notes_df),
                                                  # max_workers=16
                                                  )
+    if filter_empty:
+        doc_results_list = [doc for doc in doc_results_list if doc["data"]["num_predictions"] > 0]
 
     return doc_results_list
 
@@ -666,6 +665,7 @@ def classify_matches(labels_df, predictions_df):
         })
 
     return tp, fp, fn, classification_report
+
 
 # Function to determine if two spans intersect
 def do_intersect(start1, end1, start2, end2):
@@ -861,28 +861,47 @@ def cardio_oncology_pipeline(notes_df):
         'FAMILY': "family"
     }
 
-
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     rule_set = get_ef_gls_ruleset()
 
-    notes_results = run_medspacy(notes_df, rule_set, "NOTE_TEXT", out_dir)
+    # loop over 10k notes at a time
 
+    file_counter = 1
+
+    for i in range(0, len(notes_df), 10000):
+        sliced_notes_df = notes_df[i:i + 10000]
+
+        notes_results = run_medspacy(sliced_notes_df,
+                                     rule_set,
+                                     notes_column="NOTE_TEXT",
+                                     filter_empty=True)
+        export_as_label_studio_format(notes_results, out_dir, file_name=f"cardio_notes_{file_counter}")
+        file_counter += 1
+        # export_as_human_readable_format(notes_results, rule_set, out_dir)
 
     # valid_note_ids = [note["data"]["note_id"] for note in validation_labels]
 
     # valid_set = notes_df[notes_df["note_id"].isin(valid_note_ids)]
-
 
     # evaluate_v1(valid_results, validation_labels)
     # valid_metrics = evaluate(valid_results, validation_labels, eval_set="valid")
     # report_results_label_count(valid_results, out_dir + "/label_count.csv")
     # sampled_results = sample_results(valid_results, 100)
     # report_results_label_count(sampled_results, out_dir + "/sampled_label_count.csv")
-    export_as_label_studio_format(notes_results, out_dir)
-    export_as_human_readable_format(notes_results, rule_set, out_dir)
 
+def read_results():
+    results_dir = "/Workspace/Shared/NLP/20241011"
+
+    # loop over all files in the directory
+    all_results = []
+    for file_name in os.listdir(results_dir):
+        if file_name.endswith(".json"):
+            with open(f"{results_dir}/{file_name}", "r") as f:
+                results = json.load(f)
+                all_results.extend(results)
+    return all_results
 
 
 def main():
