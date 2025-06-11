@@ -24,7 +24,7 @@ def load_terms(term_csv_file):
 
 
 def read_data():
-    notes = pd.read_csv("datasets/cardio-oncology/data/notes.csv")
+    notes = pd.read_csv("datasets/cardio-oncology/data_with_phi/notes.csv")
     terms_list = load_terms("datasets/cardio-oncology/data/terms.csv")
 
     return notes, terms_list

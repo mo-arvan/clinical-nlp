@@ -24,6 +24,7 @@ logger.info(f"Running {__file__}")
 
 target_matcher.init()
 
+
 def load_cervical_rulebook():
     rule_set = []
     for rule in cervical_rulebook.cervical_rulebook_definition:
@@ -48,7 +49,8 @@ def load_cervical_rulebook():
 def load_cervical_data():
     data_path = "datasets/cervical/data_with_phi/holt_2023_00185_pap_hpv_deid.csv"
     cervical_validation_set = "datasets/cervical/cervical-validation.json"
-    test_set_labels = "datasets/cervical/cervical-test-1-20240827.json"
+    test_1_set = "datasets/cervical/cervical-test-1-20240827.json"
+    test_2_set = "datasets/cervical/cervical-test-2-20241029.json"
     notes_column = "PROC_NARRATIVE_CLEAN"  # "Proc narrative"
 
     notes_df = pd.read_csv(data_path)
@@ -66,14 +68,23 @@ def load_cervical_data():
     with open(cervical_validation_set, "r") as f:
         validation_labels = json.load(f)
 
-    with open(test_set_labels, "r") as f:
-        test_set_labels = json.load(f)
+    with open(test_1_set, "r") as f:
+        test_1_set = json.load(f)
+
+    with open(test_2_set, "r") as f:
+        test_2_set = json.load(f)
 
     validation_set_ids = [note["data"]["note_id"] for note in validation_labels]
-    test_set_ids = [note["data"]["note_id"] for note in test_set_labels]
+    test_1_set_ids = [note["data"]["note_id"] for note in test_1_set]
+    test_2_set_ids = [note["data"]["note_id"] for note in test_2_set]
     valid_df = notes_df[notes_df["note_id"].isin(validation_set_ids)]
-    test_df = notes_df[notes_df["note_id"].isin(test_set_ids)]
-    rest_df = notes_df[~notes_df["note_id"].isin(validation_set_ids + test_set_ids)]
+    test_1_df = notes_df[notes_df["note_id"].isin(test_1_set_ids)]
+    test_2_df = notes_df[notes_df["note_id"].isin(test_2_set_ids)]
+
+    valid_test_ids = validation_set_ids + test_1_set_ids + test_2_set_ids
+
+
+    rest_df = notes_df[~notes_df["note_id"].isin(valid_test_ids)]
 
     def get_labels_df(cervical_labels):
         gold_labels = [(l["data"]["note_id"], rr["value"]["start"], rr["value"]["end"], rr["value"]["text"], rrr) for l
@@ -89,7 +100,12 @@ def load_cervical_data():
         return labels_df
 
     valid_labels_df = get_labels_df(validation_labels)
-    test_labels_df = get_labels_df(test_set_labels)
+    test_1_labels = get_labels_df(test_1_set)
+    test_2_labels = get_labels_df(test_2_set)
+
+    annotation_count = len(valid_labels_df) + len(test_1_labels) + len(test_2_labels)
+    logger.info(f"Notes annotated: {len(valid_test_ids)}")
+    logger.info(f"Total annotations: {annotation_count}")
 
     dataset_dict = {
         "valid":
@@ -99,8 +115,13 @@ def load_cervical_data():
             },
         "test-1":
             {
-                "notes": test_df,
-                "labels": test_labels_df
+                "notes": test_1_df,
+                "labels": test_1_labels
+            },
+        "test-2":
+            {
+                "notes": test_2_df,
+                "labels": test_2_labels
             },
         "train":
             {
@@ -356,14 +377,11 @@ def sample_results(test_results, valid_results, k):
     return sampled_results
 
 
-def export_as_label_studio_format(doc_results_list, out_dir, remove_predictions=False):
-    out_file_path = f"{out_dir}/cervical_notes_with_labels.json"
-    out_file_with_pred_path = f"{out_dir}/cervical_notes_with_labels_with_pred.json"
+def export_as_label_studio_format(doc_results_list, out_dir, file_name, remove_predictions=False):
+    out_file_path = f"{out_dir}/{file_name}"
 
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
 
-    with open(out_file_with_pred_path, "w") as f:
-        json.dump(doc_results_list, f, indent=2)
     if remove_predictions:
         for i, doc in enumerate(results_list):
             results_list[i]["predictions"] = []
@@ -479,13 +497,46 @@ def classify_matches(labels_df, predictions_df):
     return tp, fp, fn, classification_report
 
 
-def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1"):
+def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_labels=True):
+    desired_columns = [
+        'Negative/Normal/NILM',
+        'Atypical Squamous Cells of undetermined Significance',
+        'Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)',
+        'Low-grade squamous intraepithelial lesion (LSIL)',
+        'High-grade squamous intraepithelial lesion (HSIL)',
+        'High-grade squamous intraepithelial lesion (HGSIL)',
+        'Squamous Cell Carcinoma',
+        'Atypical endocervical cells',
+        'Atypical endometrial cells',
+        'Atypical glandular cells',
+        'Atypical glandular cells (favors neoplastic)',
+        'Endocervical Adenocarcinoma in Situ (AIS)',
+        'Adenocarcinoma',
+        'Endocervical adenocarcinoma',
+        'Endometrial adenocarcinoma',
+        'Extrauterine adenocarcinoma',
+        'Adenocarcinoma NOS',
+        'HPV Negative',
+        'HPV Positive',
+        'HPV 16 Negative',
+        'HPV 16 Positive',
+        'HPV 18 Negative',
+        'HPV 18 Positive',
+        'HPV 18/45 Negative',
+        'HPV 18/45 positive',
+        'HPV Other Negative',
+        'HPV Other positive',
+    ]
+
     prediction_list = [(doc["id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr)
                        for doc in doc_results_list for
                        prediction in doc["predictions"]
                        for r in prediction["result"]
                        for rr in r["value"]["labels"]]
     predictions_df = pd.DataFrame(prediction_list, columns=["file_id", "start", "end", "text", "label"])
+
+    if filter_labels:
+        predictions_df = predictions_df[predictions_df["label"].isin(desired_columns)]
 
     # filter assertion labels
     assertion_labels = ["present", "absent",
@@ -494,6 +545,8 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1"):
                         "historical", "family"]
 
     labels_df = labels_df[~labels_df["label"].isin(assertion_labels)]
+    if filter_labels:
+        labels_df = labels_df[labels_df["label"].isin(desired_columns)]
     predictions_df = predictions_df[~predictions_df["label"].isin(assertion_labels)]
 
     # rename label column to label_gold
@@ -601,7 +654,7 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
         'Atypical endocervical cells',
         'Atypical endometrial cells',
         'Atypical glandular cells',
-        'Atypical glandular cells (favor neoplastic)',
+        'Atypical glandular cells (favors neoplastic)',
         'Endocervical Adenocarcinoma in Situ (AIS)',
         'Adenocarcinoma',
         'Endocervical adenocarcinoma',
@@ -618,7 +671,6 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
         'HPV 18/45 positive',
         'HPV Other Negative',
         'HPV Other positive',
-
     ]
 
     out_full_path = f"{out_dir}/cervical_notes_report_full.xlsx"
@@ -706,26 +758,39 @@ def main():
 
     logger.info("Ran medspacy on valid in {:.2f} seconds".format(time.perf_counter() - start_timer))
 
-    test_results = run_prediction_pipeline(dataset_dict["test-1"]["notes"], rule_set, notes_column)
+    test_1_results = run_prediction_pipeline(dataset_dict["test-1"]["notes"], rule_set, notes_column)
 
     logger.info("Ran medspacy on test in {:.2f} seconds".format(time.perf_counter() - start_timer))
+
+    test_2_results = run_prediction_pipeline(dataset_dict["test-2"]["notes"], rule_set, notes_column)
 
     valid_results_df = evaluate_and_report(valid_results,
                                            dataset_dict["valid"]["labels"],
                                            eval_set="valid")
-    test_results_df = evaluate_and_report(test_results,
-                                          dataset_dict["test-1"]["labels"],
-                                          eval_set="test-1")
+    test_1_results_df = evaluate_and_report(test_1_results,
+                                            dataset_dict["test-1"]["labels"],
+                                            eval_set="test-1")
+    test_2_results_df = evaluate_and_report(test_2_results,
+                                            dataset_dict["test-2"]["labels"],
+                                            eval_set="test-2",
+                                            filter_labels=True)
+
+    test_2_results_df = evaluate_and_report(test_2_results,
+                                            dataset_dict["test-2"]["labels"],
+                                            eval_set="test-2-full",
+                                            filter_labels=False)
 
     if record_performance:
         record_performance_metrics(valid_results_df, "valid", performance_baseline_dir)
-        record_performance_metrics(test_results_df, "test-1", performance_baseline_dir)
+        record_performance_metrics(test_1_results_df, "test-1", performance_baseline_dir)
 
     monitor_performance(valid_results_df, "valid", performance_baseline_dir)
-    monitor_performance(test_results_df, "test-1", performance_baseline_dir)
+    monitor_performance(test_1_results_df, "test-1", performance_baseline_dir)
 
     # export_as_label_studio_format(selected_notes, "artifacts/results/", remove_predictions=True)
-    export_as_human_readable_format(test_results, rule_set, "artifacts/results/")
+    export_as_human_readable_format(test_1_results, rule_set, "artifacts/results/")
+
+    export_as_label_studio_format(test_2_results, "artifacts/results/", "test_2_results.json")
 
     logger.info("Evaluated in {:.2f} seconds".format(time.perf_counter() - start_timer))
 

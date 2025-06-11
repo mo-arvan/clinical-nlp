@@ -1,0 +1,32 @@
+{
+    "notebook.variablesView": true,
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    // word wrap
+    "editor.wordWrap": "on",
+    "python.analysis.fixAll": [
+        "source.unusedImports"
+    ],
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        "**/data-restricted": true,
+    },
+    "files.associations": {
+        ".env*": "dotenv",
+        "*.json": "json",
+        "*.xml": "xml"
+    },
+    "github.copilot.enable": {
+        "*": true,
+        "plaintext": true,
+        "markdown": true,
+        "scminput": false,
+        "dotenv": false,
+        "json": false,
+        "xml": false
+    }
+}
