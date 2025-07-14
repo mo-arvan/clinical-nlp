@@ -1,0 +1,65 @@
+**Task:** Analyze the provided excerpt from a pathology report to determine if the specified condition is referenced in a historical context or as part of the current evaluation.
+
+
+**Instructions:**
+
+1. **Examine the Excerpt:**
+   - Read the provided excerpt carefully, focusing on the mentions of the specified condition.
+
+2. **Identify Mentions:**
+   - List all instances in the excerpt where the specified condition appears.
+
+3. **Determine Context:**
+   - For each mention of the condition, assess whether it refers to:
+     - **Current:** Findings or diagnoses directly related to the present evaluation or test results.
+     - **Historical:** References to past diagnoses, treatments, or findings that provide background context and do not pertain to the current evaluation.
+
+4. **Chain-of-Thought Analysis:**
+   - For each mention, explain your reasoning by following these steps:
+     1. **Contextual Analysis:** Summarize relevant surrounding text for each mention.
+     2. **Comparison:** Identify keywords or phrases that denote current or historical context (e.g., "previously diagnosed," "currently," "at this time," "history of").
+     3. **Conclusion:** Classify each mention as **AssertionCategory.PRESENT** or **AssertionCategory.HISTORICAL**.
+
+5. **Final Output:**
+   - Return an `AssertionResponse` with:
+     - **Reasoning:** A clear justification based on your analysis.
+     - **Assertion:** The final classification as either **AssertionCategory.PRESENT** or **AssertionCategory.HISTORICAL**.
+
+---
+
+### Example Input for Practice:
+
+1. **Input Pair:**
+   - **Excerpt:** 
+   ```
+   Clinical Information: Pap Smear, Conventional Received one fixed slide intact. LMP 12-OCT-23/03-OCT-23. History of LEEP x2 HSIL Pap 06-OCT-23/03-OCT-23 outside clinic Colpo with acetowhite (illegible) Hormonal contraception. Adequacy Assessment: Satisfactory for evaluation; transformation zone component present. Partially obscuring blood and inflammation present. Interpretation: Negative for intraepithelial lesion or malignancy. Reactive cellular changes associated with inflammation. Screened By: EN/RD,OD Completed By: Odile David, MD (Electronically Signed) 18-NOV-23/18-OCT-06. Comment: This specimen was reviewed as part of our internal quality assurance program. Note: The pap smear is not a diagnostic test. It is a screening test with an inherent false-negative rate in the range of 5-10%. Annual pap smears are the best means available to lower this false negative rate and to detect early cervical cancer. Please share this information with your patient.
+   ```
+   - **Condition:** HSIL
+
+   **Expected Output:**
+   ```json
+   {{
+     "reasoning": "The excerpt mentions a 'History of LEEP x2 HSIL' which indicates previous surgeries related to the condition HSIL. This is a reference to past interventions and does not pertain to current findings.",
+     "assertion": "historical"
+   }}
+   ```
+
+2. **Input Pair:**
+   - **Excerpt:**
+   ```
+   Clinical Information: Pap Smear reveals abnormalities consistent with LSIL; further evaluation is required. LMP 12-OCT-23.
+   ```
+   - **Condition:** LSIL
+
+   **Expected Output:**
+   ```json
+   {{
+     "reasoning": "The excerpt indicates that the current pap smear shows findings 'consistent with LSIL'. This reflects present observations requiring follow-up.",
+     "assertion": "present"
+   }}
+   ```
+
+
+**Input:**
+- **Excerpt:** {excerpt}
+- **Condition:** {condition}

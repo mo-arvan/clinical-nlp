@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Benchmark",
+            "name": "medspacy_pipeline_cervical",
             "type": "debugpy",
             "request": "launch",
-            "program": "src/benchmark.py",
+            "program": "src/medspacy_pipeline_cervical.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "envFile": "${workspaceFolder}/.env",

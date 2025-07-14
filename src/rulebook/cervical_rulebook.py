@@ -72,7 +72,7 @@ cervical_rulebook_definition = [
         "literal": "Atypical endocervical cells, favor neoplastic"
     },
     {
-        "category": "Atypical glandular cells (favor neoplastic)",
+        "category": "Atypical glandular cells (favors neoplastic)",
         "literal": "Atypical glandular cells, favor neoplastic"
     },
     {

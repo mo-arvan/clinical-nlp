@@ -6,16 +6,25 @@ import json
 import logging
 import random
 import time
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Type
 
+import litellm
+from litellm import RateLimitError  # Import the RateLimitError
+from pydantic import BaseModel
+from tenacity import retry, stop_after_attempt, wait_exponential, wait_random
+from tqdm import tqdm
 import medspacy
 import numpy as np
 import pandas as pd
 import spacy
 from medspacy.ner import TargetRule
+from pydantic import BaseModel
 
 import parallel_helper
-from resources import cervical_rulebook
-from src import target_matcher
+import target_matcher
+from rulebook import cervical_rulebook
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,20 +34,38 @@ logger.info(f"Running {__file__}")
 target_matcher.init()
 
 
+class AssertionCategory(str, Enum):
+    PRESENT = "present"
+    HISTORICAL = "historical"
+
+
+class AssertionResponse(BaseModel):
+    reasoning: str
+    assertion: AssertionCategory
+
+
 def load_cervical_rulebook():
     rule_set = []
     for rule in cervical_rulebook.cervical_rulebook_definition:
         metadata = rule.get("metadata", None)
         if "pattern" in rule:
-            rule_set.append(TargetRule(literal=None,
-                                       category=rule["category"],
-                                       pattern=rule["pattern"],
-                                       metadata=metadata))
+            rule_set.append(
+                TargetRule(
+                    literal=None,
+                    category=rule["category"],
+                    pattern=rule["pattern"],
+                    metadata=metadata,
+                )
+            )
         elif "literal" in rule:
-            rule_set.append(TargetRule(literal=rule["literal"],
-                                       category=rule["category"],
-                                       pattern=None,
-                                       metadata=metadata))
+            rule_set.append(
+                TargetRule(
+                    literal=rule["literal"],
+                    category=rule["category"],
+                    pattern=None,
+                    metadata=metadata,
+                )
+            )
         else:
             logger.error(f"Invalid rule {rule}")
 
@@ -55,15 +82,21 @@ def load_cervical_data():
 
     notes_df = pd.read_csv(data_path)
     duplicate_notes_condition = notes_df.duplicated(keep=False)
-    notes_df[duplicate_notes_condition].to_csv("artifacts/results/cervical_duplicate_notes.csv", index=False)
+    notes_df[duplicate_notes_condition].to_csv(
+        "artifacts/results/cervical_duplicate_notes.csv", index=False
+    )
 
     notes_df["note_id"] = range(len(notes_df))
-    notes_df["note_hash"] = [hashlib.md5(note.encode()).hexdigest() for note in notes_df["PROC_NARRATIVE"]]
+    notes_df["note_hash"] = [
+        hashlib.md5(note.encode()).hexdigest() for note in notes_df["PROC_NARRATIVE"]
+    ]
     # notes_df = notes_df[~duplicate_notes_condition]
     notes_df = notes_df.drop_duplicates()
     notes_df.fillna(value="Not Available", inplace=True)
 
-    notes_df["PROC_NARRATIVE_CLEAN"] = notes_df["PROC_NARRATIVE"].apply(lambda x: x.replace("\\n", "\n"))
+    notes_df["PROC_NARRATIVE_CLEAN"] = notes_df["PROC_NARRATIVE"].apply(
+        lambda x: x.replace("\\n", "\n")
+    )
 
     with open(cervical_validation_set, "r") as f:
         validation_labels = json.load(f)
@@ -83,15 +116,25 @@ def load_cervical_data():
 
     valid_test_ids = validation_set_ids + test_1_set_ids + test_2_set_ids
 
-
     rest_df = notes_df[~notes_df["note_id"].isin(valid_test_ids)]
 
     def get_labels_df(cervical_labels):
-        gold_labels = [(l["data"]["note_id"], rr["value"]["start"], rr["value"]["end"], rr["value"]["text"], rrr) for l
-                       in
-                       cervical_labels for r
-                       in l["annotations"] for rr in r["result"] for rrr in rr["value"]["labels"]]
-        labels_df = pd.DataFrame(gold_labels, columns=["file_id", "start", "end", "text", "label"])
+        gold_labels = [
+            (
+                l["data"]["note_id"],
+                rr["value"]["start"],
+                rr["value"]["end"],
+                rr["value"]["text"],
+                rrr,
+            )
+            for l in cervical_labels
+            for r in l["annotations"]
+            for rr in r["result"]
+            for rrr in rr["value"]["labels"]
+        ]
+        labels_df = pd.DataFrame(
+            gold_labels, columns=["file_id", "start", "end", "text", "label"]
+        )
         # duplicate_labels_condition = labels_df.duplicated(keep=False)
         # duplicate_labels = labels_df[duplicate_labels_condition]
         # duplicates_removed = duplicate_labels.drop_duplicates()
@@ -108,29 +151,74 @@ def load_cervical_data():
     logger.info(f"Total annotations: {annotation_count}")
 
     dataset_dict = {
-        "valid":
-            {
-                "notes": valid_df,
-                "labels": valid_labels_df
-            },
-        "test-1":
-            {
-                "notes": test_1_df,
-                "labels": test_1_labels
-            },
-        "test-2":
-            {
-                "notes": test_2_df,
-                "labels": test_2_labels
-            },
-        "train":
-            {
-                "notes": rest_df,
-                "labels": []
-            }
+        "valid": {"notes": valid_df, "labels": valid_labels_df},
+        "test-1": {"notes": test_1_df, "labels": test_1_labels},
+        "test-2": {"notes": test_2_df, "labels": test_2_labels},
+        "train": {"notes": rest_df, "labels": []},
     }
 
     return dataset_dict, notes_column
+
+
+def load_cervical_data_latest():
+    data_dir = "datasets/cervical/data_with_phi/2024_12_18_Patient data"
+    data_file = "datasets/cervical/data_with_phi/2024_12_18_Patient data/req_2023_00185_procs_hpv.csv"
+    notes_column = (
+        "RESULT"  # Using RESULT column as it contains the procedure narrative
+    )
+
+    # Read the CSV data
+    notes_df = pd.read_csv(data_file, delimiter="|")
+
+    # Handle duplicates
+    duplicate_notes_condition = notes_df.duplicated(keep=False)
+    notes_df[duplicate_notes_condition].to_csv(
+        "artifacts/results/cervical_duplicate_notes.csv", index=False
+    )
+
+    # Add note IDs and hash values
+    notes_df["note_id"] = range(len(notes_df))
+    notes_df["note_hash"] = [
+        hashlib.md5(note.encode()).hexdigest() for note in notes_df[notes_column]
+    ]
+    notes_df = notes_df.drop_duplicates()
+
+    # Fill missing values
+    notes_df.fillna(value="Not Available", inplace=True)
+
+    # Clean newlines in text
+    notes_df[f"{notes_column}_CLEAN"] = notes_df[notes_column].apply(
+        lambda x: x.replace("\\n", "\n")
+    )
+
+    # split the notes into two groups, the ones that have "history" in the text and the ones that don't
+
+    valid_df = notes_df[
+        notes_df[notes_column].str.contains("history", case=False, na=False)
+    ]
+    train_df = notes_df[
+        ~notes_df[notes_column].str.contains("history", case=False, na=False)
+    ]
+
+    # Log dataset statistics
+    logger.info(f"Total notes: {len(notes_df)}")
+
+    # Create the dataset dictionary - all data goes to train since we don't have labels
+    dataset_dict = {
+        "train": {
+            "notes": train_df,
+            "labels": pd.DataFrame(),  # No labels available
+        },
+        "valid": {
+            "notes": valid_df,
+            "labels": pd.DataFrame(),  # No labels available
+        },
+    }
+
+    return (
+        dataset_dict,
+        f"{notes_column}_CLEAN",
+    )  # Return the clean column name for processing
 
 
 def get_medspacy_label(ent):
@@ -139,11 +227,11 @@ def get_medspacy_label(ent):
 
     context_to_i2b2_label_map = {
         "NEGATED_EXISTENCE": "absent",
-        'POSSIBLE_EXISTENCE': "possible",
+        "POSSIBLE_EXISTENCE": "possible",
         "CONDITIONAL_EXISTENCE": "conditional",
         "HYPOTHETICAL": "hypothetical",
-        'HISTORICAL': "historical",
-        'FAMILY': "family"
+        "HISTORICAL": "historical",
+        "FAMILY": "family",
     }
 
     modifiers_category = [mod.category for mod in ent._.modifiers]
@@ -216,15 +304,12 @@ def run_medspacy_on_note(i_data_row, medspacy_nlp, note_text_column):
 
     results_dict = {
         "id": note_id,
-        "data": {
-            "num_predictions": len(prediction_list),
-            **row_dict
-        },
+        "data": {"num_predictions": len(prediction_list), **row_dict},
         "predictions": [
             {
                 "result": prediction_list,
             }
-        ]
+        ],
     }
 
     return results_dict
@@ -248,13 +333,15 @@ def run_medspacy_prediction_pipeline(notes_df, rule_set, notes_column):
             print(e)
     target_matcher._TargetMatcher__matcher._prune = False
 
-    run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
-                                                     medspacy_nlp=nlp,
-                                                     note_text_column=notes_column)
-    doc_results_list = parallel_helper.run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
-                                                                 notes_df.iterrows(),
-                                                                 total=len(notes_df),
-                                                                 max_workers=16)
+    run_medspacy_on_note_partial = functools.partial(
+        run_medspacy_on_note, medspacy_nlp=nlp, note_text_column=notes_column
+    )
+    doc_results_list = parallel_helper.run_in_parallel_cpu_bound(
+        run_medspacy_on_note_partial,
+        notes_df.iterrows(),
+        total=len(notes_df),
+        max_workers=16,
+    )
 
     return doc_results_list
 
@@ -270,13 +357,15 @@ def run_prediction_pipeline(notes_df, rule_set, notes_column):
     # debug_note_list = [6475]  # 349 6723, 6724 6929
     # notes_df = notes_df[notes_df["note_id"].isin(debug_note_list)]
 
-    run_medspacy_on_note_partial = functools.partial(run_medspacy_on_note,
-                                                     medspacy_nlp=nlp,
-                                                     note_text_column=notes_column)
-    doc_results_list = parallel_helper.run_in_parallel_cpu_bound(run_medspacy_on_note_partial,
-                                                                 notes_df.iterrows(),
-                                                                 total=len(notes_df),
-                                                                 max_workers=16)
+    run_medspacy_on_note_partial = functools.partial(
+        run_medspacy_on_note, medspacy_nlp=nlp, note_text_column=notes_column
+    )
+    doc_results_list = parallel_helper.run_in_parallel_cpu_bound(
+        run_medspacy_on_note_partial,
+        notes_df.iterrows(),
+        total=len(notes_df),
+        max_workers=16,
+    )
 
     return doc_results_list
 
@@ -288,19 +377,28 @@ def export_results(doc_results_list, labels_list, out_dir):
 
     results_df.to_csv("artifacts/results/cervical_notes.csv", index=False)
 
-    match_pattern_counts = results_df[["matched_pattern"]].groupby("matched_pattern").size().reset_index(name="count")
+    match_pattern_counts = (
+        results_df[["matched_pattern"]]
+        .groupby("matched_pattern")
+        .size()
+        .reset_index(name="count")
+    )
 
     missing_patterns = []
     for label, pattern in labels_list:
         if pattern not in match_pattern_counts["matched_pattern"].values:
             missing_patterns.append((pattern, 0))
 
-    missing_patterns_df = pd.DataFrame(missing_patterns, columns=["matched_pattern", "count"])
+    missing_patterns_df = pd.DataFrame(
+        missing_patterns, columns=["matched_pattern", "count"]
+    )
     match_pattern_counts = pd.concat([match_pattern_counts, missing_patterns_df])
 
     match_pattern_counts = match_pattern_counts.sort_values(by="count", ascending=False)
 
-    match_pattern_counts.to_csv("artifacts/results/cervical_notes_match_pattern_counts.csv", index=False)
+    match_pattern_counts.to_csv(
+        "artifacts/results/cervical_notes_match_pattern_counts.csv", index=False
+    )
 
     return results_df
 
@@ -335,8 +433,15 @@ def sample_results(test_results, valid_results, k):
             for r in result:
                 text = r["value"]["text"]
                 for label in r["value"]["labels"]:
-                    if label in ["present", "absent", "possible", "conditional", "hypothetical", "historical",
-                                 "family"]:
+                    if label in [
+                        "present",
+                        "absent",
+                        "possible",
+                        "conditional",
+                        "hypothetical",
+                        "historical",
+                        "family",
+                    ]:
                         continue
                     if label not in label_to_notes_dict:
                         label_to_notes_dict[label] = []
@@ -350,8 +455,12 @@ def sample_results(test_results, valid_results, k):
                     text_to_notes_dict[text] = []
                 text_to_notes_dict[text].append(i)
 
-    text_to_notes_dict = dict(sorted(text_to_notes_dict.items(), key=lambda x: len(x[1])))
-    label_to_notes_dict = dict(sorted(label_to_notes_dict.items(), key=lambda x: len(x[1])))
+    text_to_notes_dict = dict(
+        sorted(text_to_notes_dict.items(), key=lambda x: len(x[1]))
+    )
+    label_to_notes_dict = dict(
+        sorted(label_to_notes_dict.items(), key=lambda x: len(x[1]))
+    )
     label_to_support = dict(zip(valid_results["label"], valid_results["support"]))
     label_to_support = dict(sorted(label_to_support.items(), key=lambda x: x[1]))
 
@@ -377,7 +486,9 @@ def sample_results(test_results, valid_results, k):
     return sampled_results
 
 
-def export_as_label_studio_format(doc_results_list, out_dir, file_name, remove_predictions=False):
+def export_as_label_studio_format(
+    doc_results_list, out_dir, file_name, remove_predictions=False
+):
     out_file_path = f"{out_dir}/{file_name}"
 
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
@@ -394,10 +505,23 @@ def misc_func():
 
     from collections import Counter
 
-    l = Counter([r["value"]["text"] for p in doc_results_list for r in p["predictions"][0]["result"]])
+    l = Counter(
+        [
+            r["value"]["text"]
+            for p in doc_results_list
+            for r in p["predictions"][0]["result"]
+        ]
+    )
     l = sorted(l.items(), key=lambda x: x[1], reverse=True)
     print(l)
-    labels = set([ll for p in doc_results_list for r in p["predictions"][0]["result"] for ll in r["value"]["labels"]])
+    labels = set(
+        [
+            ll
+            for p in doc_results_list
+            for r in p["predictions"][0]["result"]
+            for ll in r["value"]["labels"]
+        ]
+    )
 
     known_labels = [r.category for r in rule_set]
 
@@ -408,14 +532,22 @@ def misc_func():
 def evaluate2():
     results_df.rename(columns={"label": "pred_label"}, inplace=True)
 
-    results_df_joined = results_df.merge(cervical_labels, on=["prediction_id", "matched_pattern", "pred_label"],
-                                         how="left")
+    results_df_joined = results_df.merge(
+        cervical_labels,
+        on=["prediction_id", "matched_pattern", "pred_label"],
+        how="left",
+    )
 
-    eval_df = results_df_joined[["pred_label", "gold_label"]].groupby(
-        ["pred_label", "gold_label"]).size().reset_index(name="count")
+    eval_df = (
+        results_df_joined[["pred_label", "gold_label"]]
+        .groupby(["pred_label", "gold_label"])
+        .size()
+        .reset_index(name="count")
+    )
 
-    micro_average = eval_df.groupby("gold_label").agg(
-        count=("count", "sum")).reset_index()
+    micro_average = (
+        eval_df.groupby("gold_label").agg(count=("count", "sum")).reset_index()
+    )
     annotation_values = ["false positive", "false negative", "true positive"]
 
     for annotation in annotation_values:
@@ -426,15 +558,25 @@ def evaluate2():
 
     # concatenate the two dataframes
     eval_df = pd.concat([eval_df, micro_average], ignore_index=True)
-    confusion_matrix_df = eval_df.pivot(index="pred_label", columns="gold_label", values="count").fillna(0)
+    confusion_matrix_df = eval_df.pivot(
+        index="pred_label", columns="gold_label", values="count"
+    ).fillna(0)
 
     confusion_matrix_df.to_csv("artifacts/results/cervical_confusion_matrix.csv")
-    results_df_joined.to_csv("artifacts/results/cervical_notes_with_labels.csv", index=False)
-    results_df_joined.to_excel("artifacts/results/cervical_notes_with_labels.xlsx", index=False)
+    results_df_joined.to_csv(
+        "artifacts/results/cervical_notes_with_labels.csv", index=False
+    )
+    results_df_joined.to_excel(
+        "artifacts/results/cervical_notes_with_labels.xlsx", index=False
+    )
     results_labeled = results_df_joined.dropna(subset=["gold_label"])
 
-    labels_count = results_labeled[["matched_pattern", "pred_label"]].groupby(
-        ["matched_pattern", "pred_label"]).size().reset_index(name="count")
+    labels_count = (
+        results_labeled[["matched_pattern", "pred_label"]]
+        .groupby(["matched_pattern", "pred_label"])
+        .size()
+        .reset_index(name="count")
+    )
 
     labels_count.to_csv("artifacts/results/cervical_labels_count.csv", index=False)
 
@@ -446,103 +588,131 @@ def do_intersect(start1, end1, start2, end2):
 
 # Function to find matches according to the new criteria
 def classify_matches(labels_df, predictions_df):
-    labels_list = labels_df.to_dict('records')
-    predictions_list = predictions_df.to_dict('records')
+    labels_list = labels_df.to_dict("records")
+    predictions_list = predictions_df.to_dict("records")
     tp, fp, fn = 0, 0, 0
     classification_report = []
     # Check each prediction
     for pred_dict in predictions_list:
         match_found = False
         for index, true_row in enumerate(labels_list):
-            if (pred_dict['file_id'] == true_row['file_id'] and
-                    pred_dict['label_pred'] == true_row['label_gold'] and
-                    do_intersect(pred_dict['start'], pred_dict['end'], true_row['start'], true_row['end'])):
+            if (
+                pred_dict["file_id"] == true_row["file_id"]
+                and pred_dict["label_pred"] == true_row["label_gold"]
+                and do_intersect(
+                    pred_dict["start"],
+                    pred_dict["end"],
+                    true_row["start"],
+                    true_row["end"],
+                )
+            ):
                 match_found = True
                 labels_list[index]["matched"] = True
                 tp += 1
                 classification_report.append(
-                    {'file_id': pred_dict['file_id'],
-                     'label': pred_dict['label_pred'],
-                     "classification": "true_positive",
-                     "pred_start": pred_dict['start'],
-                     "pred_end": pred_dict['end'],
-                     "gold_start": true_row['start'],
-                     "gold_end": true_row['end'],
-                     "pred_text": pred_dict['text_pred'],
-                     "gold_text": true_row['text_gold']})
+                    {
+                        "file_id": pred_dict["file_id"],
+                        "label": pred_dict["label_pred"],
+                        "classification": "true_positive",
+                        "pred_start": pred_dict["start"],
+                        "pred_end": pred_dict["end"],
+                        "gold_start": true_row["start"],
+                        "gold_end": true_row["end"],
+                        "pred_text": pred_dict["text_pred"],
+                        "gold_text": true_row["text_gold"],
+                    }
+                )
                 break
         if not match_found:
             fp += 1
-            classification_report.append({
-                'file_id': pred_dict['file_id'],
-                'label': pred_dict['label_pred'],
-                "classification": "false_positive",
-                "pred_start": pred_dict['start'],
-                "pred_end": pred_dict['end'],
-                "pred_text": pred_dict['text_pred']
-            })
+            classification_report.append(
+                {
+                    "file_id": pred_dict["file_id"],
+                    "label": pred_dict["label_pred"],
+                    "classification": "false_positive",
+                    "pred_start": pred_dict["start"],
+                    "pred_end": pred_dict["end"],
+                    "pred_text": pred_dict["text_pred"],
+                }
+            )
     # Remaining entries are false negatives
-    remaining_labels = [true_row for true_row in labels_list if "matched" not in true_row]
+    remaining_labels = [
+        true_row for true_row in labels_list if "matched" not in true_row
+    ]
     fn = len(remaining_labels)
     for fn_dict in remaining_labels:
-        classification_report.append({
-            'file_id': fn_dict['file_id'],
-            'label': fn_dict['label_gold'],
-            "classification": "false_negative",
-            "gold_start": fn_dict['start'],
-            "gold_end": fn_dict['end'],
-            "gold_text": fn_dict['text_gold']
-        })
+        classification_report.append(
+            {
+                "file_id": fn_dict["file_id"],
+                "label": fn_dict["label_gold"],
+                "classification": "false_negative",
+                "gold_start": fn_dict["start"],
+                "gold_end": fn_dict["end"],
+                "gold_text": fn_dict["text_gold"],
+            }
+        )
 
     return tp, fp, fn, classification_report
 
 
-def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_labels=True):
+def evaluate_and_report(
+    doc_results_list, labels_df, eval_set="test-1", filter_labels=True
+):
     desired_columns = [
-        'Negative/Normal/NILM',
-        'Atypical Squamous Cells of undetermined Significance',
-        'Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)',
-        'Low-grade squamous intraepithelial lesion (LSIL)',
-        'High-grade squamous intraepithelial lesion (HSIL)',
-        'High-grade squamous intraepithelial lesion (HGSIL)',
-        'Squamous Cell Carcinoma',
-        'Atypical endocervical cells',
-        'Atypical endometrial cells',
-        'Atypical glandular cells',
-        'Atypical glandular cells (favors neoplastic)',
-        'Endocervical Adenocarcinoma in Situ (AIS)',
-        'Adenocarcinoma',
-        'Endocervical adenocarcinoma',
-        'Endometrial adenocarcinoma',
-        'Extrauterine adenocarcinoma',
-        'Adenocarcinoma NOS',
-        'HPV Negative',
-        'HPV Positive',
-        'HPV 16 Negative',
-        'HPV 16 Positive',
-        'HPV 18 Negative',
-        'HPV 18 Positive',
-        'HPV 18/45 Negative',
-        'HPV 18/45 positive',
-        'HPV Other Negative',
-        'HPV Other positive',
+        "Negative/Normal/NILM",
+        "Atypical Squamous Cells of undetermined Significance",
+        "Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)",
+        "Low-grade squamous intraepithelial lesion (LSIL)",
+        "High-grade squamous intraepithelial lesion (HSIL)",
+        "High-grade squamous intraepithelial lesion (HGSIL)",
+        "Squamous Cell Carcinoma",
+        "Atypical endocervical cells",
+        "Atypical endometrial cells",
+        "Atypical glandular cells",
+        "Atypical glandular cells (favors neoplastic)",
+        "Endocervical Adenocarcinoma in Situ (AIS)",
+        "Adenocarcinoma",
+        "Endocervical adenocarcinoma",
+        "Endometrial adenocarcinoma",
+        "Extrauterine adenocarcinoma",
+        "Adenocarcinoma NOS",
+        "HPV Negative",
+        "HPV Positive",
+        "HPV 16 Negative",
+        "HPV 16 Positive",
+        "HPV 18 Negative",
+        "HPV 18 Positive",
+        "HPV 18/45 Negative",
+        "HPV 18/45 positive",
+        "HPV Other Negative",
+        "HPV Other positive",
     ]
 
-    prediction_list = [(doc["id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr)
-                       for doc in doc_results_list for
-                       prediction in doc["predictions"]
-                       for r in prediction["result"]
-                       for rr in r["value"]["labels"]]
-    predictions_df = pd.DataFrame(prediction_list, columns=["file_id", "start", "end", "text", "label"])
+    prediction_list = [
+        (doc["id"], r["value"]["start"], r["value"]["end"], r["value"]["text"], rr)
+        for doc in doc_results_list
+        for prediction in doc["predictions"]
+        for r in prediction["result"]
+        for rr in r["value"]["labels"]
+    ]
+    predictions_df = pd.DataFrame(
+        prediction_list, columns=["file_id", "start", "end", "text", "label"]
+    )
 
     if filter_labels:
         predictions_df = predictions_df[predictions_df["label"].isin(desired_columns)]
 
     # filter assertion labels
-    assertion_labels = ["present", "absent",
-                        "possible", "conditional",
-                        "hypothetical", "associated_with_someone_else",
-                        "historical", "family"]
+    assertion_labels = [
+        "present",
+        "absent",
+        "possible",
+        "conditional",
+        "hypothetical",
+        "associated_with_someone_else",
+        "historical",
+        "family",
+    ]
 
     labels_df = labels_df[~labels_df["label"].isin(assertion_labels)]
     if filter_labels:
@@ -552,11 +722,15 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_l
     # rename label column to label_gold
     labels_df = labels_df.rename(columns={"label": "label_gold", "text": "text_gold"})
     # rename label column to label_pred
-    predictions_df = predictions_df.rename(columns={"label": "label_pred", "text": "text_pred"})
+    predictions_df = predictions_df.rename(
+        columns={"label": "label_pred", "text": "text_pred"}
+    )
 
     # merged_df = pd.merge(labels_df, predictions_df, how="outer", on=["file_id", "start", "end"])
     # remove nan from the set
-    labels_set = set(labels_df["label_gold"].tolist() + predictions_df["label_pred"].tolist())
+    labels_set = set(
+        labels_df["label_gold"].tolist() + predictions_df["label_pred"].tolist()
+    )
     labels_set = {label for label in labels_set if label == label}
     labels_set = sorted(labels_set)
 
@@ -565,27 +739,48 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_l
     # merged_df["correct"] = merged_df["label_gold"] == merged_df["label_pred"]
 
     classification_report_df = pd.DataFrame(classification_report)
-    classification_report_df.to_csv(f"artifacts/results/cervical_classification_report_{eval_set}.csv",
-                                    index=False,
-                                    quoting=csv.QUOTE_NONNUMERIC)
+    classification_report_df.to_csv(
+        f"artifacts/results/cervical_classification_report_{eval_set}.csv",
+        index=False,
+        quoting=csv.QUOTE_NONNUMERIC,
+    )
 
-    columns = ["label",
-               "true_positives", "false_positives", "false_negatives",
-               "support", "precision", "recall", "f1"]
+    columns = [
+        "label",
+        "true_positives",
+        "false_positives",
+        "false_negatives",
+        "support",
+        "precision",
+        "recall",
+        "f1",
+    ]
 
     metrics_list = []
 
     for label in labels_set:
-        true_positives = len(classification_report_df[(classification_report_df["label"] == label) &
-                                                      (classification_report_df["classification"] == "true_positive")])
-        false_positives = len(classification_report_df[(classification_report_df["label"] == label) &
-                                                       (classification_report_df[
-                                                            "classification"] == "false_positive")])
-        false_negatives = len(classification_report_df[(classification_report_df["label"] == label) &
-                                                       (classification_report_df[
-                                                            "classification"] == "false_negative")])
+        true_positives = len(
+            classification_report_df[
+                (classification_report_df["label"] == label)
+                & (classification_report_df["classification"] == "true_positive")
+            ]
+        )
+        false_positives = len(
+            classification_report_df[
+                (classification_report_df["label"] == label)
+                & (classification_report_df["classification"] == "false_positive")
+            ]
+        )
+        false_negatives = len(
+            classification_report_df[
+                (classification_report_df["label"] == label)
+                & (classification_report_df["classification"] == "false_negative")
+            ]
+        )
 
-        precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+        precision, recall, f1 = calculate_precision_recall_f1(
+            true_positives, false_positives, false_negatives
+        )
 
         label_metric = {
             "label": label,
@@ -595,14 +790,16 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_l
             "support": true_positives + false_negatives,
             "precision": precision,
             "recall": recall,
-            "f1": f1
+            "f1": f1,
         }
         metrics_list.append(label_metric)
 
     true_positives = sum([m["true_positives"] for m in metrics_list])
     false_positives = sum([m["false_positives"] for m in metrics_list])
     false_negatives = sum([m["false_negatives"] for m in metrics_list])
-    precision, recall, f1 = calculate_precision_recall_f1(true_positives, false_positives, false_negatives)
+    precision, recall, f1 = calculate_precision_recall_f1(
+        true_positives, false_positives, false_negatives
+    )
 
     micro_dict = {
         "label": "micro",
@@ -612,7 +809,7 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_l
         "support": true_positives + false_negatives,
         "precision": precision,
         "recall": recall,
-        "f1": f1
+        "f1": f1,
     }
 
     # micro average
@@ -620,7 +817,7 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_l
         "label": "macro",
         "precision": np.mean([m["precision"] for m in metrics_list]),
         "recall": np.mean([m["recall"] for m in metrics_list]),
-        "f1": np.mean([m["f1"] for m in metrics_list])
+        "f1": np.mean([m["f1"] for m in metrics_list]),
     }
 
     results_per_label_df = pd.DataFrame(metrics_list, columns=columns)
@@ -632,10 +829,16 @@ def evaluate_and_report(doc_results_list, labels_df, eval_set="test-1", filter_l
     results_per_label_df.to_csv(f"artifacts/results/cervical_eval_{eval_set}.csv")
     results_per_label_df.to_latex(f"artifacts/results/cervical_eval_{eval_set}.tex")
 
-    results_macro_micro_df.to_csv(f"artifacts/results/cervical_micro_macro_{eval_set}.csv")
-    results_macro_micro_df.to_latex(f"artifacts/results/cervical_micro_macro_{eval_set}.tex")
+    results_macro_micro_df.to_csv(
+        f"artifacts/results/cervical_micro_macro_{eval_set}.csv"
+    )
+    results_macro_micro_df.to_latex(
+        f"artifacts/results/cervical_micro_macro_{eval_set}.tex"
+    )
 
-    results_df = pd.concat([results_per_label_df, results_macro_micro_df], ignore_index=True)
+    results_df = pd.concat(
+        [results_per_label_df, results_macro_micro_df], ignore_index=True
+    )
 
     return results_df
 
@@ -644,33 +847,33 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
     predicted_columns = [r.category for r in rule_set]
 
     desired_columns = [
-        'Negative/Normal/NILM',
-        'Atypical Squamous Cells of undetermined Significance',
-        'Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)',
-        'Low-grade squamous intraepithelial lesion (LSIL)',
-        'High-grade squamous intraepithelial lesion (HSIL)',
-        'High-grade squamous intraepithelial lesion (HGSIL)',
-        'Squamous Cell Carcinoma',
-        'Atypical endocervical cells',
-        'Atypical endometrial cells',
-        'Atypical glandular cells',
-        'Atypical glandular cells (favors neoplastic)',
-        'Endocervical Adenocarcinoma in Situ (AIS)',
-        'Adenocarcinoma',
-        'Endocervical adenocarcinoma',
-        'Endometrial adenocarcinoma',
-        'Extrauterine adenocarcinoma',
-        'Adenocarcinoma NOS',
-        'HPV Negative',
-        'HPV Positive',
-        'HPV 16 Negative',
-        'HPV 16 Positive',
-        'HPV 18 Negative',
-        'HPV 18 Positive',
-        'HPV 18/45 Negative',
-        'HPV 18/45 positive',
-        'HPV Other Negative',
-        'HPV Other positive',
+        "Negative/Normal/NILM",
+        "Atypical Squamous Cells of undetermined Significance",
+        "Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)",
+        "Low-grade squamous intraepithelial lesion (LSIL)",
+        "High-grade squamous intraepithelial lesion (HSIL)",
+        "High-grade squamous intraepithelial lesion (HGSIL)",
+        "Squamous Cell Carcinoma",
+        "Atypical endocervical cells",
+        "Atypical endometrial cells",
+        "Atypical glandular cells",
+        "Atypical glandular cells (favors neoplastic)",
+        "Endocervical Adenocarcinoma in Situ (AIS)",
+        "Adenocarcinoma",
+        "Endocervical adenocarcinoma",
+        "Endometrial adenocarcinoma",
+        "Extrauterine adenocarcinoma",
+        "Adenocarcinoma NOS",
+        "HPV Negative",
+        "HPV Positive",
+        "HPV 16 Negative",
+        "HPV 16 Positive",
+        "HPV 18 Negative",
+        "HPV 18 Positive",
+        "HPV 18/45 Negative",
+        "HPV 18/45 positive",
+        "HPV Other Negative",
+        "HPV Other positive",
     ]
 
     out_full_path = f"{out_dir}/cervical_notes_report_full.xlsx"
@@ -682,7 +885,9 @@ def export_as_human_readable_format(doc_results_list, rule_set, out_dir):
         doc_row = doc["data"].copy()
         doc_results = doc["predictions"][0]["result"]
         for pred_column in predicted_columns:
-            matching_results = next(filter(lambda x: pred_column in x["value"]["labels"], doc_results), None)
+            matching_results = next(
+                filter(lambda x: pred_column in x["value"]["labels"], doc_results), None
+            )
             if matching_results:
                 doc_row[pred_column] = "Yes"
             else:
@@ -704,18 +909,26 @@ def record_performance_metrics(results_df, set_name, performance_baseline_dir):
     results_df.to_csv(f"{performance_baseline_dir}/{set_name}_results.csv", index=False)
 
 
-def monitor_performance(results_df, set_name, performance_baseline_dir, rtol=0.01, atol=0.01):
+def monitor_performance(
+    results_df, set_name, performance_baseline_dir, rtol=0.01, atol=0.01
+):
     # compare the result with the baseline, if the difference is greater than the tolerance, but less than twice
     # the tolerance, then we log a warning, if it is greater than twice the tolerance, we log an error
-    baseline_results_df = pd.read_parquet(f"{performance_baseline_dir}/{set_name}_results.parquet")
+    baseline_results_df = pd.read_parquet(
+        f"{performance_baseline_dir}/{set_name}_results.parquet"
+    )
 
     logger.info(f"\n----\nMonitoring {set_name} performance")
 
     for _, row in results_df.iterrows():
-        matching_baseline = baseline_results_df[(baseline_results_df["label"] == row["label"])]
+        matching_baseline = baseline_results_df[
+            (baseline_results_df["label"] == row["label"])
+        ]
 
         if len(matching_baseline) != 1:
-            logger.error(f"Unexpected number of matches for {row['label']}, len:{len(matching_baseline)}")
+            logger.error(
+                f"Unexpected number of matches for {row['label']}, len:{len(matching_baseline)}"
+            )
             continue
         matching_baseline_row = matching_baseline.iloc[0]
 
@@ -723,24 +936,38 @@ def monitor_performance(results_df, set_name, performance_baseline_dir, rtol=0.0
             pass
 
         # we compare the f1 score
-        if not np.allclose(row["f1"], matching_baseline_row["f1"], rtol=rtol, atol=atol):
-            if np.allclose(row["f1"], matching_baseline_row["f1"], rtol=2 * rtol, atol=2 * atol):
+        if not np.allclose(
+            row["f1"], matching_baseline_row["f1"], rtol=rtol, atol=atol
+        ):
+            if np.allclose(
+                row["f1"], matching_baseline_row["f1"], rtol=2 * rtol, atol=2 * atol
+            ):
                 logger.error(
-                    f"Error: {row['label']} f1 score changed from {matching_baseline_row['f1']} to {row['f1']}")
+                    f"Error: {row['label']} f1 score changed from {matching_baseline_row['f1']} to {row['f1']}"
+                )
             else:
                 logger.warning(
-                    f"Warning: {row['label']} f1 score changed from {matching_baseline_row['f1']} to {row['f1']}")
+                    f"Warning: {row['label']} f1 score changed from {matching_baseline_row['f1']} to {row['f1']}"
+                )
 
     logger.info(f"Monitoring {set_name} performance done\n\n")
 
 
-def main():
+def batch_one_pipeline():
     arg_parser = argparse.ArgumentParser()
 
-    arg_parser.add_argument("--record-performance", action="store_true", help="Record performance",
-                            default=False)
-    arg_parser.add_argument("--performance-baseline-dir", type=str, help="Performance baseline directory",
-                            default="monitoring/20240829")
+    arg_parser.add_argument(
+        "--record-performance",
+        action="store_true",
+        help="Record performance",
+        default=False,
+    )
+    arg_parser.add_argument(
+        "--performance-baseline-dir",
+        type=str,
+        help="Performance baseline directory",
+        default="monitoring/20240829",
+    )
 
     args = arg_parser.parse_args()
 
@@ -754,47 +981,247 @@ def main():
     logger.info("Read file in {:.2f} seconds".format(time.perf_counter() - start_timer))
     start_timer = time.perf_counter()
 
-    valid_results = run_prediction_pipeline(dataset_dict["valid"]["notes"], rule_set, notes_column)
+    # train_results = run_medspacy_prediction_pipeline(
+    #     dataset_dict["train"]["notes"], rule_set, notes_column
+    # )
 
-    logger.info("Ran medspacy on valid in {:.2f} seconds".format(time.perf_counter() - start_timer))
+    valid_results = run_prediction_pipeline(
+        dataset_dict["valid"]["notes"], rule_set, notes_column
+    )
 
-    test_1_results = run_prediction_pipeline(dataset_dict["test-1"]["notes"], rule_set, notes_column)
+    logger.info(
+        "Ran medspacy on valid in {:.2f} seconds".format(
+            time.perf_counter() - start_timer
+        )
+    )
 
-    logger.info("Ran medspacy on test in {:.2f} seconds".format(time.perf_counter() - start_timer))
+    test_1_results = run_prediction_pipeline(
+        dataset_dict["test-1"]["notes"], rule_set, notes_column
+    )
 
-    test_2_results = run_prediction_pipeline(dataset_dict["test-2"]["notes"], rule_set, notes_column)
+    logger.info(
+        "Ran medspacy on test in {:.2f} seconds".format(
+            time.perf_counter() - start_timer
+        )
+    )
 
-    valid_results_df = evaluate_and_report(valid_results,
-                                           dataset_dict["valid"]["labels"],
-                                           eval_set="valid")
-    test_1_results_df = evaluate_and_report(test_1_results,
-                                            dataset_dict["test-1"]["labels"],
-                                            eval_set="test-1")
-    test_2_results_df = evaluate_and_report(test_2_results,
-                                            dataset_dict["test-2"]["labels"],
-                                            eval_set="test-2",
-                                            filter_labels=True)
+    test_2_results = run_prediction_pipeline(
+        dataset_dict["test-2"]["notes"], rule_set, notes_column
+    )
 
-    test_2_results_df = evaluate_and_report(test_2_results,
-                                            dataset_dict["test-2"]["labels"],
-                                            eval_set="test-2-full",
-                                            filter_labels=False)
+    valid_results_df = evaluate_and_report(
+        valid_results, dataset_dict["valid"]["labels"], eval_set="valid"
+    )
+    test_1_results_df = evaluate_and_report(
+        test_1_results, dataset_dict["test-1"]["labels"], eval_set="test-1"
+    )
+    test_2_results_df = evaluate_and_report(
+        test_2_results,
+        dataset_dict["test-2"]["labels"],
+        eval_set="test-2",
+        filter_labels=True,
+    )
+
+    test_2_results_df = evaluate_and_report(
+        test_2_results,
+        dataset_dict["test-2"]["labels"],
+        eval_set="test-2-full",
+        filter_labels=False,
+    )
 
     if record_performance:
         record_performance_metrics(valid_results_df, "valid", performance_baseline_dir)
-        record_performance_metrics(test_1_results_df, "test-1", performance_baseline_dir)
+        record_performance_metrics(
+            test_1_results_df, "test-1", performance_baseline_dir
+        )
 
     monitor_performance(valid_results_df, "valid", performance_baseline_dir)
     monitor_performance(test_1_results_df, "test-1", performance_baseline_dir)
 
-    # export_as_label_studio_format(selected_notes, "artifacts/results/", remove_predictions=True)
-    export_as_human_readable_format(test_1_results, rule_set, "artifacts/results/")
+    # export_as_label_studio_format(
+    #     selected_notes, "artifacts/results/", remove_predictions=True
+    # )
+    # export_as_human_readable_format(test_1_results, rule_set, "artifacts/results/")
 
-    export_as_label_studio_format(test_2_results, "artifacts/results/", "test_2_results.json")
+    # export_as_label_studio_format(
+    #     test_2_results, "artifacts/results/", "test_2_results.json"
+    # )
 
     logger.info("Evaluated in {:.2f} seconds".format(time.perf_counter() - start_timer))
 
 
-if __name__ == '__main__':
+def run_llm_analysis(results_list, notes_column):
+    prompt_path = "src/rulebook/prompts/historical_prompt.txt"
+    prompt_template = Path(prompt_path).read_text()
+
+    for i, result in enumerate(results_list):
+        if "predictions" not in result or len(result["predictions"]) == 0:
+            continue
+        prediction = result["predictions"][0]
+        if "result" not in prediction or len(prediction["result"]) == 0:
+            continue
+        for j, r in enumerate(prediction["result"]):
+            if "value" not in r or "labels" not in r["value"]:
+                continue
+            excerpt = result["data"].get(notes_column, "")
+            condition = r["value"]["text"]
+
+            message = prompt_template.format(
+                condition=condition,
+                excerpt=excerpt,
+            )
+            message_formatted = [{"role": "user", "content": message}]
+
+            output_schema = AssertionResponse
+            response = litellm.completion(
+                model="gpt-4.1-mini",
+                messages=message_formatted,
+                temperature=0,
+                max_tokens=None,
+                timeout=30,
+                response_format=output_schema,
+                num_retries=5,
+            )
+            response_json = output_schema.model_validate_json(
+                response.choices[0].message.content
+            )
+            response_dict = response_json.model_dump()
+
+            results_list[i]["predictions"][0]["result"][j]["value"]["assertion"] = (
+                response_dict
+            )
+
+    # filter results that have historical assertion
+    # AssertionCategory.HISTORICAL
+
+    historical_results = [
+        result
+        for result in results_list
+        if "predictions" in result
+        and len(result["predictions"]) > 0
+        and any(
+            r["value"].get("assertion", {}).get("category")
+            == AssertionCategory.HISTORICAL
+            for r in result["predictions"][0]["result"]
+        )
+    ]
+    other_results = [
+        result
+        for result in results_list
+        if "predictions" in result
+        and len(result["predictions"]) > 0
+        and not any(
+            r["value"].get("assertion", {}).get("category")
+            != AssertionCategory.HISTORICAL
+            for r in result["predictions"][0]["result"]
+        )
+    ]
+
+
+def batch_two_pipeline():
+    arg_parser = argparse.ArgumentParser()
+
+    arg_parser.add_argument(
+        "--record-performance",
+        action="store_true",
+        help="Record performance",
+        default=False,
+    )
+    arg_parser.add_argument(
+        "--performance-baseline-dir",
+        type=str,
+        help="Performance baseline directory",
+        default="monitoring/20240829",
+    )
+
+    args = arg_parser.parse_args()
+
+    record_performance = args.record_performance
+    performance_baseline_dir = args.performance_baseline_dir
+
+    start_timer = time.perf_counter()
+    dataset_dict, notes_column = load_cervical_data_latest()
+    rule_set = load_cervical_rulebook()
+
+    logger.info("Read file in {:.2f} seconds".format(time.perf_counter() - start_timer))
+    start_timer = time.perf_counter()
+
+    # train_results = run_medspacy_prediction_pipeline(
+    #     dataset_dict["train"]["notes"], rule_set, notes_column
+    # )
+
+    valid_results = run_prediction_pipeline(
+        dataset_dict["valid"]["notes"], rule_set, notes_column
+    )
+
+    logger.info(
+        "Ran medspacy on valid in {:.2f} seconds".format(
+            time.perf_counter() - start_timer
+        )
+    )
+
+    valid_llm_results = run_llm_analysis(valid_results, notes_column)
+
+    test_1_results = run_prediction_pipeline(
+        dataset_dict["test-1"]["notes"], rule_set, notes_column
+    )
+
+    logger.info(
+        "Ran medspacy on test in {:.2f} seconds".format(
+            time.perf_counter() - start_timer
+        )
+    )
+
+    test_2_results = run_prediction_pipeline(
+        dataset_dict["test-2"]["notes"], rule_set, notes_column
+    )
+
+    valid_results_df = evaluate_and_report(
+        valid_results, dataset_dict["valid"]["labels"], eval_set="valid"
+    )
+    test_1_results_df = evaluate_and_report(
+        test_1_results, dataset_dict["test-1"]["labels"], eval_set="test-1"
+    )
+    test_2_results_df = evaluate_and_report(
+        test_2_results,
+        dataset_dict["test-2"]["labels"],
+        eval_set="test-2",
+        filter_labels=True,
+    )
+
+    test_2_results_df = evaluate_and_report(
+        test_2_results,
+        dataset_dict["test-2"]["labels"],
+        eval_set="test-2-full",
+        filter_labels=False,
+    )
+
+    if record_performance:
+        record_performance_metrics(valid_results_df, "valid", performance_baseline_dir)
+        record_performance_metrics(
+            test_1_results_df, "test-1", performance_baseline_dir
+        )
+
+    monitor_performance(valid_results_df, "valid", performance_baseline_dir)
+    monitor_performance(test_1_results_df, "test-1", performance_baseline_dir)
+
+    # export_as_label_studio_format(
+    #     selected_notes, "artifacts/results/", remove_predictions=True
+    # )
+    # export_as_human_readable_format(test_1_results, rule_set, "artifacts/results/")
+
+    # export_as_label_studio_format(
+    #     test_2_results, "artifacts/results/", "test_2_results.json"
+    # )
+
+    logger.info("Evaluated in {:.2f} seconds".format(time.perf_counter() - start_timer))
+
+
+def main():
+    # batch_one_pipeline()
+    batch_two_pipeline()
+
+
+if __name__ == "__main__":
     main()
     logger.info("Done")

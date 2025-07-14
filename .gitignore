@@ -1,5 +1,7 @@
 datasets/*/data
 datasets/CHIA/11855817/*
+datasets
+results
 
 data_with_phi
 

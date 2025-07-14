@@ -1,13 +1,13 @@
 version: '3'
 services:
   label-studio:
-    image: heartexlabs/label-studio:latest
+    image: heartexlabs/label-studio:1.20.0
     ports:
       - "8080:8080"
     volumes:
       - ./label-studio:/label-studio/data
   cardio-label-studio:
-    image: heartexlabs/label-studio:latest
+    image: heartexlabs/label-studio:1.20.0
     ports:
       - "8080:8080"
     volumes:
