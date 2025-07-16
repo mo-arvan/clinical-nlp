@@ -25,6 +25,7 @@ class PipelineConfig:
     reasoning_effort: Optional[str] = None
     max_workers: int = 8
     prompt_path: str = ""
+    num_retries: int = 5
 
 
 class StructuredLLMPipeline:

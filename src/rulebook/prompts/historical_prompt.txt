@@ -1,65 +1,88 @@
-**Task:** Analyze the provided excerpt from a pathology report to determine if the specified condition is referenced in a historical context or as part of the current evaluation.
+You are given:
 
+- **Excerpt:** a passage of text containing context.
+- **Extracted text:** a span of text extracted by deterministic rules as a candidate concept.
+- **Label:** the category or type assigned by prior rule-based extraction.
 
-**Instructions:**
+Your goal is to:
 
-1. **Examine the Excerpt:**
-   - Read the provided excerpt carefully, focusing on the mentions of the specified condition.
+1. Verify if the extracted text is truly present and relevant as the indicated label in the given excerpt.
+2. Determine the assertion status of the extracted text using exactly one of these categories:
 
-2. **Identify Mentions:**
-   - List all instances in the excerpt where the specified condition appears.
-
-3. **Determine Context:**
-   - For each mention of the condition, assess whether it refers to:
-     - **Current:** Findings or diagnoses directly related to the present evaluation or test results.
-     - **Historical:** References to past diagnoses, treatments, or findings that provide background context and do not pertain to the current evaluation.
-
-4. **Chain-of-Thought Analysis:**
-   - For each mention, explain your reasoning by following these steps:
-     1. **Contextual Analysis:** Summarize relevant surrounding text for each mention.
-     2. **Comparison:** Identify keywords or phrases that denote current or historical context (e.g., "previously diagnosed," "currently," "at this time," "history of").
-     3. **Conclusion:** Classify each mention as **AssertionCategory.PRESENT** or **AssertionCategory.HISTORICAL**.
-
-5. **Final Output:**
-   - Return an `AssertionResponse` with:
-     - **Reasoning:** A clear justification based on your analysis.
-     - **Assertion:** The final classification as either **AssertionCategory.PRESENT** or **AssertionCategory.HISTORICAL**.
+- **positive**: concept is positively asserted, clearly present
+- **negated**: concept is explicitly negated or denied
+- **possible**: concept is possibly present but uncertain
+- **hypothetical**: concept is mentioned conditionally or hypothetically
+- **family**: concept refers to family history (not the patient)
+- **historical**: concept refers to past but resolved history
 
 ---
 
-### Example Input for Practice:
+### Instructions
 
-1. **Input Pair:**
-   - **Excerpt:** 
-   ```
-   Clinical Information: Pap Smear, Conventional Received one fixed slide intact. LMP 12-OCT-23/03-OCT-23. History of LEEP x2 HSIL Pap 06-OCT-23/03-OCT-23 outside clinic Colpo with acetowhite (illegible) Hormonal contraception. Adequacy Assessment: Satisfactory for evaluation; transformation zone component present. Partially obscuring blood and inflammation present. Interpretation: Negative for intraepithelial lesion or malignancy. Reactive cellular changes associated with inflammation. Screened By: EN/RD,OD Completed By: Odile David, MD (Electronically Signed) 18-NOV-23/18-OCT-06. Comment: This specimen was reviewed as part of our internal quality assurance program. Note: The pap smear is not a diagnostic test. It is a screening test with an inherent false-negative rate in the range of 5-10%. Annual pap smears are the best means available to lower this false negative rate and to detect early cervical cancer. Please share this information with your patient.
-   ```
-   - **Condition:** HSIL
+Output a JSON object with two fields:
 
-   **Expected Output:**
-   ```json
-   {{
-     "reasoning": "The excerpt mentions a 'History of LEEP x2 HSIL' which indicates previous surgeries related to the condition HSIL. This is a reference to past interventions and does not pertain to current findings.",
-     "assertion": "historical"
-   }}
-   ```
+```json
+{{
+  "verified": <true or false>,
+  "assertion": "<one of the categories above>"
+}}
+```
 
-2. **Input Pair:**
-   - **Excerpt:**
-   ```
-   Clinical Information: Pap Smear reveals abnormalities consistent with LSIL; further evaluation is required. LMP 12-OCT-23.
-   ```
-   - **Condition:** LSIL
+- `"verified"` indicates whether the extracted text is genuinely relevant in the excerpt, considering the given label.
+- `"assertion"` must be one of the six categories above.
 
-   **Expected Output:**
-   ```json
-   {{
-     "reasoning": "The excerpt indicates that the current pap smear shows findings 'consistent with LSIL'. This reflects present observations requiring follow-up.",
-     "assertion": "present"
-   }}
-   ```
+---
 
+### Input:
 
-**Input:**
-- **Excerpt:** {excerpt}
-- **Condition:** {condition}
+Excerpt:  
+"""{{excerpt}}"""
+
+Extracted text:  
+"{{text}}"
+
+Label:  
+"{{label}}"
+
+---
+
+### Example 1:
+
+Excerpt: "The patient denies any history of hypertension but her mother had it."  
+Extracted text: "hypertension"  
+Label: "Problem"
+
+Output:
+
+```json
+{{
+  "verified": true,
+  "assertion": "negated"
+}}
+```
+
+### Example 2:
+
+Excerpt: "Patient has a history of breast cancer diagnosed in 2010."  
+Extracted text: "breast cancer"  
+Label: "Problem"
+
+Output:
+
+```json
+{{
+  "verified": true,
+  "assertion": "historical"
+}}
+```
+
+---
+
+Now, please verify and classify the extracted text according to the instructions.
+
+## Input:   
+
+Excerpt: "{excerpt}"
+Extracted text: "{text}"
+Label: "{label}"

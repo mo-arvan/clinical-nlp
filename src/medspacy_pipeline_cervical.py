@@ -25,6 +25,7 @@ from pydantic import BaseModel
 import parallel_helper
 import target_matcher
 from rulebook import cervical_rulebook
+from pipeline import PipelineConfig, StructuredLLMPipeline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,13 +36,19 @@ target_matcher.init()
 
 
 class AssertionCategory(str, Enum):
-    PRESENT = "present"
+    POSITIVE = "positive"
+    NEGATED = "negated"
+    POSSIBLE = "possible"
+    HYPOTHETICAL = "hypothetical"
+    FAMILY = "family"
     HISTORICAL = "historical"
 
 
-class AssertionResponse(BaseModel):
-    reasoning: str
+class ConceptExtractionVerification(BaseModel):
+    verified: bool
     assertion: AssertionCategory
+    
+
 
 
 def load_cervical_rulebook():
@@ -1051,9 +1058,9 @@ def batch_one_pipeline():
 
 
 def run_llm_analysis(results_list, notes_column):
-    prompt_path = "src/rulebook/prompts/historical_prompt.txt"
-    prompt_template = Path(prompt_path).read_text()
 
+
+    input_list = []
     for i, result in enumerate(results_list):
         if "predictions" not in result or len(result["predictions"]) == 0:
             continue
@@ -1063,33 +1070,92 @@ def run_llm_analysis(results_list, notes_column):
         for j, r in enumerate(prediction["result"]):
             if "value" not in r or "labels" not in r["value"]:
                 continue
+            note_id = result["id"]
+            prediction_id = r["id"]
             excerpt = result["data"].get(notes_column, "")
-            condition = r["value"]["text"]
+            text = r["value"]["text"]
+            label = r["value"]["labels"][0]
 
-            message = prompt_template.format(
-                condition=condition,
-                excerpt=excerpt,
-            )
-            message_formatted = [{"role": "user", "content": message}]
+            input_dict = {
+                "note_id": note_id,
+                "prediction_id": prediction_id,
+                "excerpt": excerpt,
+                "text": text,
+                "label": label,
+            }
 
-            output_schema = AssertionResponse
-            response = litellm.completion(
-                model="gpt-4.1-mini",
-                messages=message_formatted,
-                temperature=0,
-                max_tokens=None,
-                timeout=30,
-                response_format=output_schema,
-                num_retries=5,
-            )
-            response_json = output_schema.model_validate_json(
-                response.choices[0].message.content
-            )
-            response_dict = response_json.model_dump()
+            input_list.append(input_dict)
+            
+    prompt_path = "src/rulebook/prompts/historical_prompt.txt"
+    output_schema = ConceptExtractionVerification
 
-            results_list[i]["predictions"][0]["result"][j]["value"]["assertion"] = (
-                response_dict
-            )
+    pipeline_config = PipelineConfig(
+        model="gpt-4.1-mini",
+        temperature=0,
+        max_tokens=None,
+        timeout=30,
+        prompt_path=prompt_path,
+        num_retries=3,
+    )
+    
+    pipeline = StructuredLLMPipeline(
+        config=pipeline_config,
+        output_schema=output_schema,
+    )
+    
+    results = pipeline.process_items(input_list)
+    results_with_prediction_id = []
+    
+    for i, r in enumerate(results):
+        if r is not None:
+            r_dict = r.model_dump()
+            r_dict["prediction_id"] = input_list[i]["prediction_id"]
+            results_with_prediction_id.append(r_dict)
+        else:
+            results_with_prediction_id.append(None)    
+    
+    # need to merge results back to results_list
+    input_id_to_response_dict = {r["prediction_id"]: r for r in results_with_prediction_id if r is not None}
+    
+    for i, result in enumerate(results_list):
+        if "predictions" not in result or len(result["predictions"]) == 0:
+            continue
+        prediction = result["predictions"][0]
+        if "result" not in prediction or len(prediction["result"]) == 0:
+            continue
+        for j, r in enumerate(prediction["result"]):
+            if "value" not in r or "labels" not in r["value"]:
+                continue
+            prediction_id = r["id"]
+            response_dict = input_id_to_response_dict.get(prediction_id, None)
+            if response_dict is not None:
+                # add the response dict to the value
+                r["value"]["assertion"] = response_dict
+                
+    with open("artifacts/results/llm_results.json", "w") as f:
+        json.dump(results_list, f, indent=2)
+                
+                
+    # filter verified and positive results
+    verified_positive_results = []
+    for i, result in enumerate(results_list):
+        if "predictions" not in result or len(result["predictions"]) == 0:
+            continue
+        prediction = result["predictions"][0]
+        if "result" not in prediction or len(prediction["result"]) == 0:
+            continue
+        for j, r in enumerate(prediction["result"]):
+            if "value" not in r or "labels" not in r["value"]:
+                continue
+            if "assertion" not in r["value"]:
+                continue
+            response_dict = r["value"]["assertion"]
+            if response_dict.get("verified", False) and response_dict.get("category") == AssertionCategory.HISTORICAL:
+                verified_positive_results.append((result["id"], r["id"], response_dict))
+            # add the response dict to the value
+            r["value"]["assertion"] = response_dict
+
+    results_list[i]["predictions"][0]["result"][j]["value"]["assertion"] = response_dict
 
     # filter results that have historical assertion
     # AssertionCategory.HISTORICAL
@@ -1149,6 +1215,8 @@ def batch_two_pipeline():
     # train_results = run_medspacy_prediction_pipeline(
     #     dataset_dict["train"]["notes"], rule_set, notes_column
     # )
+    # select 10 notes randomly from valid
+    dataset_dict["valid"]["notes"] = dataset_dict["valid"]["notes"].sample(10)
 
     valid_results = run_prediction_pipeline(
         dataset_dict["valid"]["notes"], rule_set, notes_column
