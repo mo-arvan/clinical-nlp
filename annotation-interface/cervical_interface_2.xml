@@ -1,0 +1,66 @@
+<View>
+    <View style="box-shadow: 2px 2px 5px #999; padding: 20px; margin-top: 2em; border-radius: 5px;">
+        <Header value="Labels" size="12"/>
+        <Labels name="label" toName="text">
+            <Label value="positive" background="#7AC38F"/>
+            <Label value="negated" background="#DD5252"/>
+            <Label value="possible" background="#FFA39E"/>
+            <Label value="hypothetical" background="#9E9E9E"/>
+            <Label value="family" background="#AD8BC9"/>
+            <Label value="historical" background="#B4A7D6"/>
+            <Label value="Satisfactory for evaluation"/>
+            <Label value="Unsatisfactory for evaluation"/>
+            <Label value="Transformation zone component not identified"/>
+            <Label value="Negative/Normal/NILM"/>
+            <Label value="Negative for Carcinoma"/>
+            <Label value="Atypical Squamous Cells of undetermined Significance"/>
+            <Label value="Atypical squamous cells cannot exclude HSIL atypical squamous cells (ASC-H)"/>
+            <Label value="Low-grade squamous intraepithelial lesion (LSIL)"/>
+            <Label value="High-grade squamous intraepithelial lesion (HSIL)"/>
+            <Label value="High-grade squamous intraepithelial lesion (HGSIL)"/>
+            <Label value="Histologic HSIL (unspecified)"/>
+            <Label value="Squamous Cell Carcinoma"/>
+            <Label value="Atypical endocervical cells"/>
+            <Label value="Atypical endometrial cells"/>
+            <Label value="Atypical glandular cells"/>
+            <Label value="Atypical endocervical cells (Favors neoplastic)"/>
+            <Label value="Atypical glandular cells (favors neoplastic)"/>
+            <Label value="Endocervical Adenocarcinoma in Situ (AIS)"/>
+            <Label value="Adenocarcinoma"/>
+            <Label value="Endocervical adenocarcinoma"/>
+            <Label value="Endometrial adenocarcinoma"/>
+            <Label value="Extrauterine adenocarcinoma"/>
+            <Label value="Adenocarcinoma NOS"/>
+            <Label value="Trichomonas Vaginalis"/>
+            <Label value="Candida"/>
+            <Label value="Bacterial Vaginosis"/>
+            <Label value="Actinomyces"/>
+            <Label value="Herpes Simplex Virus"/>
+            <Label value="Cytomegalovirus"/>
+            <Label value="HPV Negative"/>
+            <Label value="HPV 16 Negative"/>
+            <Label value="HPV 18 Negative"/>
+            <Label value="HPV Other Negative"/>
+            <Label value="HPV 18/45 Negative"/>
+            <Label value="HPV Positive"/>
+            <Label value="HPV 16 Positive"/>
+            <Label value="HPV 18 Positive"/>
+            <Label value="HPV Other positive"/>
+            <Label value="HPV 18/45 positive"/>
+            <Label value="Benign"/>
+            <Label value="CIN 1"/>
+            <Label value="CIN 2"/>
+            <Label value="CIN3"/>
+            <Label value="CIN 2-3"/>
+            <Label value="Cancer NOS"/>
+            <Label value="Small Cell Cancer"/>
+            <Label value="Squamous Cell Cancer"/>
+            <Label value="Endometrial Cancer"/>
+            <Label value="Adenocarcinoma"/>
+            <Label value="Vaginal squamous intraepithelial neoplasia"/>
+        </Labels>
+        <Header value="Report" size="12"/>
+        <Text name="text" value="$RESULT_CLEAN"/>
+
+    </View>
+</View>

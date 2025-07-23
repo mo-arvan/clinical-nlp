@@ -47,8 +47,6 @@ class AssertionCategory(str, Enum):
 class ConceptExtractionVerification(BaseModel):
     verified: bool
     assertion: AssertionCategory
-    
-
 
 
 def load_cervical_rulebook():
@@ -499,6 +497,11 @@ def export_as_label_studio_format(
     out_file_path = f"{out_dir}/{file_name}"
 
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
+    
+    for i, doc in enumerate(results_list):
+        for p in doc["predictions"]:
+            for r in p["result"]:
+                r["value"]["labels"][1] = r["value"]["assertion"]["assertion"].value
 
     if remove_predictions:
         for i, doc in enumerate(results_list):
@@ -1058,8 +1061,6 @@ def batch_one_pipeline():
 
 
 def run_llm_analysis(results_list, notes_column):
-
-
     input_list = []
     for i, result in enumerate(results_list):
         if "predictions" not in result or len(result["predictions"]) == 0:
@@ -1085,38 +1086,40 @@ def run_llm_analysis(results_list, notes_column):
             }
 
             input_list.append(input_dict)
-            
+
     prompt_path = "src/rulebook/prompts/historical_prompt.txt"
     output_schema = ConceptExtractionVerification
 
     pipeline_config = PipelineConfig(
-        model="gpt-4.1-mini",
+        model="azure/gpt-4.1-mini",
         temperature=0,
         max_tokens=None,
         timeout=30,
         prompt_path=prompt_path,
         num_retries=3,
     )
-    
+
     pipeline = StructuredLLMPipeline(
         config=pipeline_config,
         output_schema=output_schema,
     )
-    
+
     results = pipeline.process_items(input_list)
     results_with_prediction_id = []
-    
+
     for i, r in enumerate(results):
         if r is not None:
             r_dict = r.model_dump()
             r_dict["prediction_id"] = input_list[i]["prediction_id"]
             results_with_prediction_id.append(r_dict)
         else:
-            results_with_prediction_id.append(None)    
-    
+            results_with_prediction_id.append(None)
+
     # need to merge results back to results_list
-    input_id_to_response_dict = {r["prediction_id"]: r for r in results_with_prediction_id if r is not None}
-    
+    input_id_to_response_dict = {
+        r["prediction_id"]: r for r in results_with_prediction_id if r is not None
+    }
+
     for i, result in enumerate(results_list):
         if "predictions" not in result or len(result["predictions"]) == 0:
             continue
@@ -1131,11 +1134,10 @@ def run_llm_analysis(results_list, notes_column):
             if response_dict is not None:
                 # add the response dict to the value
                 r["value"]["assertion"] = response_dict
-                
+
     with open("artifacts/results/llm_results.json", "w") as f:
         json.dump(results_list, f, indent=2)
-                
-                
+    return results_list
     # filter verified and positive results
     verified_positive_results = []
     for i, result in enumerate(results_list):
@@ -1150,7 +1152,10 @@ def run_llm_analysis(results_list, notes_column):
             if "assertion" not in r["value"]:
                 continue
             response_dict = r["value"]["assertion"]
-            if response_dict.get("verified", False) and response_dict.get("category") == AssertionCategory.HISTORICAL:
+            if (
+                response_dict.get("verified", False)
+                and response_dict.get("category") == AssertionCategory.HISTORICAL
+            ):
                 verified_positive_results.append((result["id"], r["id"], response_dict))
             # add the response dict to the value
             r["value"]["assertion"] = response_dict
@@ -1216,7 +1221,11 @@ def batch_two_pipeline():
     #     dataset_dict["train"]["notes"], rule_set, notes_column
     # )
     # select 10 notes randomly from valid
-    dataset_dict["valid"]["notes"] = dataset_dict["valid"]["notes"].sample(10)
+    selected_ids = [138, 314, 602, 2076, 4971, 6224, 8509, 12762]
+    # dataset_dict["valid"]["notes"] = dataset_dict["valid"]["notes"].sample(10)
+    selected_notes = dataset_dict["valid"]["notes"][
+        dataset_dict["valid"]["notes"]["note_id"].isin(selected_ids)
+    ]
 
     valid_results = run_prediction_pipeline(
         dataset_dict["valid"]["notes"], rule_set, notes_column
@@ -1229,6 +1238,12 @@ def batch_two_pipeline():
     )
 
     valid_llm_results = run_llm_analysis(valid_results, notes_column)
+
+    export_as_label_studio_format(
+        valid_llm_results, "artifacts/results/", 
+        "batch_four_validation.json",
+        remove_predictions=False
+    )
 
     test_1_results = run_prediction_pipeline(
         dataset_dict["test-1"]["notes"], rule_set, notes_column

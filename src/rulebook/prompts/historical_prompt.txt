@@ -6,15 +6,14 @@ You are given:
 
 Your goal is to:
 
-1. Verify if the extracted text is truly present and relevant as the indicated label in the given excerpt.
-2. Determine the assertion status of the extracted text using exactly one of these categories:
+Determine the modefier (assertion) status of the extracted text using exactly one of these categories:
 
 - **positive**: concept is positively asserted, clearly present
-- **negated**: concept is explicitly negated or denied
+- **negated**: concept is explicitly negated or denied, negative for X, e.g., "no history of X"
 - **possible**: concept is possibly present but uncertain
 - **hypothetical**: concept is mentioned conditionally or hypothetically
 - **family**: concept refers to family history (not the patient)
-- **historical**: concept refers to past but resolved history
+- **historical**: concept refers to past but resolved history, history of prior, history of, 
 
 ---
 
@@ -31,19 +30,6 @@ Output a JSON object with two fields:
 
 - `"verified"` indicates whether the extracted text is genuinely relevant in the excerpt, considering the given label.
 - `"assertion"` must be one of the six categories above.
-
----
-
-### Input:
-
-Excerpt:  
-"""{{excerpt}}"""
-
-Extracted text:  
-"{{text}}"
-
-Label:  
-"{{label}}"
 
 ---
 
