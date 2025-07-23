@@ -45,7 +45,7 @@ class AssertionCategory(str, Enum):
 
 
 class ConceptExtractionVerification(BaseModel):
-    verified: bool
+    reasoning: str
     assertion: AssertionCategory
 
 
@@ -497,11 +497,6 @@ def export_as_label_studio_format(
     out_file_path = f"{out_dir}/{file_name}"
 
     results_list = [doc for doc in doc_results_list if len(doc) > 0]
-    
-    for i, doc in enumerate(results_list):
-        for p in doc["predictions"]:
-            for r in p["result"]:
-                r["value"]["labels"][1] = r["value"]["assertion"]["assertion"].value
 
     if remove_predictions:
         for i, doc in enumerate(results_list):
@@ -1061,132 +1056,111 @@ def batch_one_pipeline():
 
 
 def run_llm_analysis(results_list, notes_column):
-    input_list = []
-    for i, result in enumerate(results_list):
-        if "predictions" not in result or len(result["predictions"]) == 0:
-            continue
-        prediction = result["predictions"][0]
-        if "result" not in prediction or len(prediction["result"]) == 0:
-            continue
-        for j, r in enumerate(prediction["result"]):
-            if "value" not in r or "labels" not in r["value"]:
-                continue
-            note_id = result["id"]
-            prediction_id = r["id"]
-            excerpt = result["data"].get(notes_column, "")
-            text = r["value"]["text"]
-            label = r["value"]["labels"][0]
-
-            input_dict = {
-                "note_id": note_id,
-                "prediction_id": prediction_id,
-                "excerpt": excerpt,
-                "text": text,
-                "label": label,
-            }
-
-            input_list.append(input_dict)
-
-    prompt_path = "src/rulebook/prompts/historical_prompt.txt"
-    output_schema = ConceptExtractionVerification
-
-    pipeline_config = PipelineConfig(
-        model="azure/gpt-4.1-mini",
-        temperature=0,
-        max_tokens=None,
-        timeout=30,
-        prompt_path=prompt_path,
-        num_retries=3,
-    )
-
-    pipeline = StructuredLLMPipeline(
-        config=pipeline_config,
-        output_schema=output_schema,
-    )
-
-    results = pipeline.process_items(input_list)
-    results_with_prediction_id = []
-
-    for i, r in enumerate(results):
-        if r is not None:
-            r_dict = r.model_dump()
-            r_dict["prediction_id"] = input_list[i]["prediction_id"]
-            results_with_prediction_id.append(r_dict)
-        else:
-            results_with_prediction_id.append(None)
-
-    # need to merge results back to results_list
-    input_id_to_response_dict = {
-        r["prediction_id"]: r for r in results_with_prediction_id if r is not None
-    }
-
-    for i, result in enumerate(results_list):
-        if "predictions" not in result or len(result["predictions"]) == 0:
-            continue
-        prediction = result["predictions"][0]
-        if "result" not in prediction or len(prediction["result"]) == 0:
-            continue
-        for j, r in enumerate(prediction["result"]):
-            if "value" not in r or "labels" not in r["value"]:
-                continue
-            prediction_id = r["id"]
-            response_dict = input_id_to_response_dict.get(prediction_id, None)
-            if response_dict is not None:
-                # add the response dict to the value
-                r["value"]["assertion"] = response_dict
-
-    with open("artifacts/results/llm_results.json", "w") as f:
-        json.dump(results_list, f, indent=2)
-    return results_list
-    # filter verified and positive results
-    verified_positive_results = []
-    for i, result in enumerate(results_list):
-        if "predictions" not in result or len(result["predictions"]) == 0:
-            continue
-        prediction = result["predictions"][0]
-        if "result" not in prediction or len(prediction["result"]) == 0:
-            continue
-        for j, r in enumerate(prediction["result"]):
-            if "value" not in r or "labels" not in r["value"]:
-                continue
-            if "assertion" not in r["value"]:
-                continue
-            response_dict = r["value"]["assertion"]
-            if (
-                response_dict.get("verified", False)
-                and response_dict.get("category") == AssertionCategory.HISTORICAL
+    # Step 1: Extract annotations from results
+    def extract_annotations(results):
+        annotations = []
+        for result in results:
+            # Skip if no valid predictions
+            if not result.get("predictions") or not result["predictions"][0].get(
+                "result"
             ):
-                verified_positive_results.append((result["id"], r["id"], response_dict))
-            # add the response dict to the value
-            r["value"]["assertion"] = response_dict
+                continue
 
-    results_list[i]["predictions"][0]["result"][j]["value"]["assertion"] = response_dict
+            for annotation in result["predictions"][0]["result"]:
+                # Skip invalid annotations
+                if not annotation.get("value") or "labels" not in annotation["value"]:
+                    continue
 
-    # filter results that have historical assertion
-    # AssertionCategory.HISTORICAL
+                annotations.append(
+                    {
+                        "note_id": result["id"],
+                        "prediction_id": annotation["id"],
+                        "excerpt": result["data"].get(notes_column, ""),
+                        "text": annotation["value"]["text"],
+                        "label": annotation["value"]["labels"][0],
+                    }
+                )
+        return annotations
 
-    historical_results = [
-        result
-        for result in results_list
-        if "predictions" in result
-        and len(result["predictions"]) > 0
-        and any(
-            r["value"].get("assertion", {}).get("category")
-            == AssertionCategory.HISTORICAL
-            for r in result["predictions"][0]["result"]
+    # Step 2: Run LLM analysis for assertions
+    def run_llm_pipeline(annotations):
+        pipeline_config = PipelineConfig(
+            model="azure/gpt-4.1-mini",
+            temperature=0,
+            max_tokens=None,
+            timeout=30,
+            prompt_path="src/rulebook/prompts/assertion.txt",
+            num_retries=3,
         )
-    ]
-    other_results = [
-        result
-        for result in results_list
-        if "predictions" in result
-        and len(result["predictions"]) > 0
-        and not any(
-            r["value"].get("assertion", {}).get("category")
-            != AssertionCategory.HISTORICAL
-            for r in result["predictions"][0]["result"]
+
+        pipeline = StructuredLLMPipeline(
+            config=pipeline_config,
+            output_schema=ConceptExtractionVerification,
         )
-    ]
+
+        results = pipeline.process_items(annotations)
+
+        # Add prediction_id to results
+        return [
+            {**r.model_dump(), "prediction_id": annotations[i]["prediction_id"]}
+            if r is not None
+            else None
+            for i, r in enumerate(results)
+        ]
+
+    # Step 3: Merge modifier results back into original structure
+    def merge_results(original_results, llm_results):
+        # Create lookup dictionary for quick access
+        assertion_lookup = {r["prediction_id"]: r for r in llm_results if r is not None}
+
+        # Merge back into original structure
+        for result in original_results:
+            if not "predictions" in result:
+                result["predictions"] = []
+
+            prediction = {"model_version": "combined_model_v1", "result": []}
+
+            # Process each annotation
+            for annotation in result.get("predictions", [{}])[0].get("result", []):
+                if not annotation.get("value"):
+                    continue
+
+                prediction_id = annotation["id"]
+
+                # Keep the original label prediction
+                prediction["result"].append(annotation)
+
+                # Add corresponding assertion if available
+                if prediction_id in assertion_lookup:
+                    assertion_result = {
+                        "value": {
+                            "start": annotation["value"]["start"],
+                            "end": annotation["value"]["end"],
+                            "text": annotation["value"]["text"],
+                            "labels": [assertion_lookup[prediction_id]["assertion"]],
+                        },
+                        "id": f"{prediction_id}",
+                        "from_name": "assertion",
+                        "to_name": "text",
+                        "type": "labels",
+                        "origin": "prediction",
+                    }
+                    prediction["result"].append(assertion_result)
+
+            result["predictions"] = [prediction]
+
+        return original_results
+
+    # Main execution
+    annotations = extract_annotations(results_list)
+    llm_results = run_llm_pipeline(annotations)
+    final_results = merge_results(results_list, llm_results)
+
+    # Save results
+    with open("artifacts/results/llm_results.json", "w") as f:
+        json.dump(final_results, f, indent=2)
+
+    return final_results
 
 
 def batch_two_pipeline():
@@ -1223,82 +1197,38 @@ def batch_two_pipeline():
     # select 10 notes randomly from valid
     selected_ids = [138, 314, 602, 2076, 4971, 6224, 8509, 12762]
     # dataset_dict["valid"]["notes"] = dataset_dict["valid"]["notes"].sample(10)
-    selected_notes = dataset_dict["valid"]["notes"][
+    debug_notes = dataset_dict["valid"]["notes"][
         dataset_dict["valid"]["notes"]["note_id"].isin(selected_ids)
     ]
 
+    debug_results = run_prediction_pipeline(debug_notes, rule_set, notes_column)
+    debug_llm_results = run_llm_analysis(debug_results, notes_column)
+
+    export_as_label_studio_format(
+        debug_llm_results,
+        "artifacts/results/",
+        "batch_four_debug.json",
+        remove_predictions=False,
+    )
+
+    logger.info(
+        "Ran medspacy on debug in {:.2f} seconds".format(
+            time.perf_counter() - start_timer
+        )
+    )
     valid_results = run_prediction_pipeline(
         dataset_dict["valid"]["notes"], rule_set, notes_column
     )
-
-    logger.info(
-        "Ran medspacy on valid in {:.2f} seconds".format(
-            time.perf_counter() - start_timer
-        )
-    )
-
     valid_llm_results = run_llm_analysis(valid_results, notes_column)
 
     export_as_label_studio_format(
-        valid_llm_results, "artifacts/results/", 
+        valid_llm_results,
+        "artifacts/results/",
         "batch_four_validation.json",
-        remove_predictions=False
+        remove_predictions=False,
     )
 
-    test_1_results = run_prediction_pipeline(
-        dataset_dict["test-1"]["notes"], rule_set, notes_column
-    )
-
-    logger.info(
-        "Ran medspacy on test in {:.2f} seconds".format(
-            time.perf_counter() - start_timer
-        )
-    )
-
-    test_2_results = run_prediction_pipeline(
-        dataset_dict["test-2"]["notes"], rule_set, notes_column
-    )
-
-    valid_results_df = evaluate_and_report(
-        valid_results, dataset_dict["valid"]["labels"], eval_set="valid"
-    )
-    test_1_results_df = evaluate_and_report(
-        test_1_results, dataset_dict["test-1"]["labels"], eval_set="test-1"
-    )
-    test_2_results_df = evaluate_and_report(
-        test_2_results,
-        dataset_dict["test-2"]["labels"],
-        eval_set="test-2",
-        filter_labels=True,
-    )
-
-    test_2_results_df = evaluate_and_report(
-        test_2_results,
-        dataset_dict["test-2"]["labels"],
-        eval_set="test-2-full",
-        filter_labels=False,
-    )
-
-    if record_performance:
-        record_performance_metrics(valid_results_df, "valid", performance_baseline_dir)
-        record_performance_metrics(
-            test_1_results_df, "test-1", performance_baseline_dir
-        )
-
-    monitor_performance(valid_results_df, "valid", performance_baseline_dir)
-    monitor_performance(test_1_results_df, "test-1", performance_baseline_dir)
-
-    # export_as_label_studio_format(
-    #     selected_notes, "artifacts/results/", remove_predictions=True
-    # )
-    # export_as_human_readable_format(test_1_results, rule_set, "artifacts/results/")
-
-    # export_as_label_studio_format(
-    #     test_2_results, "artifacts/results/", "test_2_results.json"
-    # )
-
-    logger.info("Evaluated in {:.2f} seconds".format(time.perf_counter() - start_timer))
-
+    return
 
 def main():
     # batch_one_pipeline()

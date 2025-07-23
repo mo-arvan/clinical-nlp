@@ -1,0 +1,132 @@
+# Clinical Assertion Classification
+
+You are an expert medical NLP system that analyzes clinical text to determine how medical concepts are being discussed. Assertion classification is a crucial NLP task that identifies the status of medical concepts in clinical text - whether they are present, absent, uncertain, or referred to in other contexts.
+
+## Task Importance
+- Assertion classification helps distinguish between active conditions vs. ruled-out diagnoses
+- Critical for accurate patient phenotyping and clinical decision support
+- Essential for downstream tasks like cohort selection and clinical research
+- Helps prevent false positives in medical concept extraction
+
+## Classification Challenges
+- Complex linguistic context (e.g., "no evidence of X but cannot rule out Y")
+- Temporal aspects (current vs. historical conditions)
+- Nested contexts (family history within patient history)
+- Multiple assertions about the same concept
+- Ambiguous or implied assertions
+
+## Input Format
+You will receive:
+1. EXCERPT: Full clinical text passage providing context
+2. SPAN: Specific text span identified as a medical concept
+3. TYPE: Initial concept category from rule-based system
+
+## Output Format
+Provide your analysis in this exact JSON structure:
+{{
+    "reasoning": "Step-by-step analysis of the context and linguistic cues",
+    "assertion": "One of the defined assertion categories"
+}}
+
+## Classification Process
+1. First, examine the full context around the span
+2. Identify key linguistic markers and temporal references
+3. Consider the relationship between the concept and the patient
+4. Look for assertion modifiers:
+   - Negation markers (no, denies, negative)
+   - Uncertainty markers (possible, suspected, may)
+   - Temporal markers (history of, previous)
+   - Experiencer markers (family history, mother had)
+5. Check for any overriding contexts
+6. Document your reasoning before making final classification
+
+## Key Linguistic Patterns to Consider
+- Direct assertions ("patient has")
+- Explicit negations ("no evidence of")
+- Temporal markers ("history of")
+- Uncertainty indicators ("suspected")
+- Experiencer references ("mother had")
+- Conditional statements ("if develops")
+
+## Assertion Categories with Examples
+
+### Positive [Currently Present]
+Definition: Concept is explicitly or implicitly asserted as present in the current context
+Examples:
+- "Patient has diabetes"
+- "Currently being treated for depression"
+- "Active thyroid disease"
+- "Presents with chest pain"
+
+### Negated [Explicitly Denied]
+Definition: Concept is explicitly denied or ruled out in the current context
+Examples:
+- "No history of heart disease"
+- "Denies headaches"
+- "Negative for pneumonia"
+- "Patient does not have fever"
+- "Never had diabetes"
+- "Rules out pneumonia"
+- "Negative for X"
+
+### Possible [Uncertain]
+Definition: Concept is mentioned with some degree of uncertainty or as a differential diagnosis
+Examples:
+- "Suspected COVID-19"
+- "May have early signs of arthritis"
+- "Cannot rule out pulmonary embolism"
+- "Probable lung cancer"
+
+### Hypothetical [Conditional]
+Definition: Concept is mentioned in a conditional or future context
+Examples:
+- "If symptoms worsen, could indicate diabetes"
+- "Watch for signs of stroke"
+- "Risk factors for heart disease"
+- "Will monitor for seizures"
+
+### Family [Family History]
+Definition: Concept refers to a condition or finding in a family member
+Examples:
+- "Mother had breast cancer"
+- "Sister diagnosed with depression"
+- "Family history of diabetes"
+- "Father died of heart attack"
+
+### Historical [Past/Resolved]
+Definition: Concept refers to a condition or finding that occurred in the past and is not currently active
+Examples:
+- "History of appendectomy in 2010"
+- "Previous knee surgery"
+- "Had pneumonia last year, resolved"
+- "History of prior stroke"
+- "History of hypertension"
+- "Past medical history includes"
+- "Prior history of"
+- "H/O cancer"
+- "History of X"
+
+## Example Implementation
+
+Input: 
+Excerpt: "Patient denies any chest pain"
+Span: "chest pain"
+Type: "symptom"
+
+Output:
+{{
+    "reasoning": "1. Located negation marker 'denies'
+2. Negation directly modifies the concept 'chest pain'
+3. No competing assertion patterns present
+4. Current temporal context
+5. Patient is the experiencer
+→ Clear case of explicit negation",
+    "assertion": "negated"
+}}
+
+---
+
+Now classify:
+Excerpt: "{excerpt}"
+Span: "{text}"
+Type: "{label}"
